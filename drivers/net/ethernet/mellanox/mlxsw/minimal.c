@@ -127,8 +127,9 @@ static int mlxsw_m_fw_rev_validate(struct mlxsw_m *mlxsw_m)
 	dev_info(mlxsw_m->bus_info->dev, "The firmware version %d.%d.%d\n",
 		 rev->major, rev->minor, rev->subminor);
 	/* Validate driver & FW are compatible */
-	if (rev->minor >= MLXSW_M_FWREV_MINOR &&
-	    rev->subminor >= MLXSW_M_FWREV_SUBMINOR)
+	if ((rev->minor > MLXSW_M_FWREV_MINOR) ||
+	    (rev->minor == MLXSW_M_FWREV_MINOR &&
+	     rev->subminor >= MLXSW_M_FWREV_SUBMINOR))
 		return 0;
 
 	dev_info(mlxsw_m->bus_info->dev, "The firmware version %d.%d.%d is incompatible with the driver (required >= %d.%d.%d)\n",
