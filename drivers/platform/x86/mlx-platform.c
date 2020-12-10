@@ -2187,6 +2187,20 @@ static struct mlxreg_core_data mlxplat_mlxcpld_default_ng_led_data[] = {
 		.bit = BIT(5),
 	},
 	{
+		.label = "fan7:green",
+		.reg = MLXPLAT_CPLD_LPC_REG_LED6_OFFSET,
+		.mask = MLXPLAT_CPLD_LED_LO_NIBBLE_MASK,
+		.capability = MLXPLAT_CPLD_LPC_REG_FAN_DRW_CAP_OFFSET,
+		.bit = BIT(6),
+	},
+	{
+		.label = "fan7:orange",
+		.reg = MLXPLAT_CPLD_LPC_REG_LED6_OFFSET,
+		.mask = MLXPLAT_CPLD_LED_LO_NIBBLE_MASK,
+		.capability = MLXPLAT_CPLD_LPC_REG_FAN_DRW_CAP_OFFSET,
+		.bit = BIT(6),
+	},
+	{
 		.label = "uid:blue",
 		.reg = MLXPLAT_CPLD_LPC_REG_LED5_OFFSET,
 		.mask = MLXPLAT_CPLD_LED_LO_NIBBLE_MASK,
@@ -3512,6 +3526,20 @@ static struct mlxreg_core_data mlxplat_mlxcpld_default_fan_data[] = {
 		.capability = MLXPLAT_CPLD_LPC_REG_FAN_CAP2_OFFSET,
 		.bit = BIT(3),
 		.reg_prsnt = MLXPLAT_CPLD_LPC_REG_FAN_OFFSET,
+	},
+	{
+		.label = "tacho13",
+		.reg = MLXPLAT_CPLD_LPC_REG_TACHO13_OFFSET,
+		.mask = GENMASK(7, 0),
+		.capability = MLXPLAT_CPLD_LPC_REG_FAN_CAP2_OFFSET,
+		.bit = BIT(4),
+	},
+	{
+		.label = "tacho14",
+		.reg = MLXPLAT_CPLD_LPC_REG_TACHO14_OFFSET,
+		.mask = GENMASK(7, 0),
+		.capability = MLXPLAT_CPLD_LPC_REG_FAN_CAP2_OFFSET,
+		.bit = BIT(5),
 	},
 	{
 		.label = "conf",
