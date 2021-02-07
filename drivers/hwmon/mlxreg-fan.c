@@ -12,7 +12,7 @@
 #include <linux/regmap.h>
 #include <linux/thermal.h>
 
-#define MLXREG_FAN_MAX_TACHO		12
+#define MLXREG_FAN_MAX_TACHO		14
 #define MLXREG_FAN_MAX_STATE		10
 #define MLXREG_FAN_MIN_DUTY		51	/* 20% */
 #define MLXREG_FAN_MAX_DUTY		255	/* 100% */
@@ -230,6 +230,8 @@ mlxreg_fan_is_visible(const void *data, enum hwmon_sensor_types type, u32 attr,
 }
 
 static const u32 mlxreg_fan_hwmon_fan_config[] = {
+	HWMON_F_INPUT | HWMON_F_FAULT,
+	HWMON_F_INPUT | HWMON_F_FAULT,
 	HWMON_F_INPUT | HWMON_F_FAULT,
 	HWMON_F_INPUT | HWMON_F_FAULT,
 	HWMON_F_INPUT | HWMON_F_FAULT,
