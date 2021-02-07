@@ -105,7 +105,8 @@ mlxreg_hotplug_pdata_export(void *pdata, void *regmap)
 }
 
 static int mlxreg_hotplug_device_create(struct mlxreg_hotplug_priv_data *priv,
-					struct mlxreg_core_data *data)
+					struct mlxreg_core_data *data,
+					enum mlxreg_hotplug_kind kind)
 {
 	struct i2c_board_info *brdinfo = data->hpdev.brdinfo;
 	struct mlxreg_core_hotplug_platform_data *pdata;
@@ -168,12 +169,16 @@ static int mlxreg_hotplug_device_create(struct mlxreg_hotplug_priv_data *priv,
 		break;
 	}
 
+	if (data->hpdev.user_handler)
+		return data->hpdev.user_handler(data->hpdev.handle, kind, 1);
+
 	return 0;
 }
 
 static void
 mlxreg_hotplug_device_destroy(struct mlxreg_hotplug_priv_data *priv,
-			      struct mlxreg_core_data *data)
+			      struct mlxreg_core_data *data,
+			      enum mlxreg_hotplug_kind kind)
 {
 	/* Notify user by sending hwmon uevent. */
 	mlxreg_hotplug_udev_event_send(&priv->hwmon->kobj, data, false);
@@ -197,6 +202,9 @@ mlxreg_hotplug_device_destroy(struct mlxreg_hotplug_priv_data *priv,
 	default:
 		break;
 	}
+
+	if (data->hpdev.user_handler)
+		data->hpdev.user_handler(data->hpdev.handle, kind, 0);
 }
 
 static ssize_t mlxreg_hotplug_attr_show(struct device *dev,
@@ -367,14 +375,14 @@ mlxreg_hotplug_work_helper(struct mlxreg_hotplug_priv_data *priv,
 		data = item->data + bit;
 		if (regval & BIT(bit)) {
 			if (item->inversed)
-				mlxreg_hotplug_device_destroy(priv, data);
+				mlxreg_hotplug_device_destroy(priv, data, item->kind);
 			else
-				mlxreg_hotplug_device_create(priv, data);
+				mlxreg_hotplug_device_create(priv, data, item->kind);
 		} else {
 			if (item->inversed)
-				mlxreg_hotplug_device_create(priv, data);
+				mlxreg_hotplug_device_create(priv, data, item->kind);
 			else
-				mlxreg_hotplug_device_destroy(priv, data);
+				mlxreg_hotplug_device_destroy(priv, data, item->kind);
 		}
 	}
 
@@ -431,7 +439,7 @@ mlxreg_hotplug_health_work_helper(struct mlxreg_hotplug_priv_data *priv,
 				 * ASIC is in steady state. Connect associated
 				 * device, if configured.
 				 */
-				mlxreg_hotplug_device_create(priv, data);
+				mlxreg_hotplug_device_create(priv, data, item->kind);
 				data->attached = true;
 			}
 		} else {
@@ -441,7 +449,7 @@ mlxreg_hotplug_health_work_helper(struct mlxreg_hotplug_priv_data *priv,
 				 * in steady state. Disconnect associated
 				 * device, if it has been connected.
 				 */
-				mlxreg_hotplug_device_destroy(priv, data);
+				mlxreg_hotplug_device_destroy(priv, data, item->kind);
 				data->attached = false;
 				data->health_cntr = 0;
 			}
@@ -680,7 +688,7 @@ static void mlxreg_hotplug_unset_irq(struct mlxreg_hotplug_priv_data *priv)
 		/* Remove all the attached devices in group. */
 		count = item->count;
 		for (j = 0; j < count; j++, data++)
-			mlxreg_hotplug_device_destroy(priv, data);
+			mlxreg_hotplug_device_destroy(priv, data, item->kind);
 	}
 }
 
