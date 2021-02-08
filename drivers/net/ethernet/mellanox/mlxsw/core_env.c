@@ -16,7 +16,7 @@
 	MLXSW_REG_MCIA_TH_PAGE_NUM) ? (page) : (page) + \
 	MLXSW_ENV_CMIS_PAGE_OFF)
 
-static int mlxsw_env_validate_cable_ident(struct mlxsw_core *core, int id,
+static int mlxsw_env_validate_cable_ident(struct mlxsw_core *core, u8 slot_index, int id,
 					  bool *qsfp, bool *cmis)
 {
 	char eeprom_tmp[MLXSW_REG_MCIA_EEPROM_SIZE];
@@ -24,8 +24,9 @@ static int mlxsw_env_validate_cable_ident(struct mlxsw_core *core, int id,
 	u8 ident;
 	int err;
 
-	mlxsw_reg_mcia_pack(mcia_pl, id, 0, MLXSW_REG_MCIA_PAGE0_LO_OFF, 0, 1,
-			    MLXSW_REG_MCIA_I2C_ADDR_LOW);
+	mlxsw_reg_mcia_pack(mcia_pl, slot_index, id, 0,
+			    MLXSW_REG_MCIA_PAGE0_LO_OFF, 0,
+			    1, MLXSW_REG_MCIA_I2C_ADDR_LOW);
 	err = mlxsw_reg_query(core, MLXSW_REG(mcia), mcia_pl);
 	if (err)
 		return err;
@@ -55,8 +56,8 @@ static int mlxsw_env_validate_cable_ident(struct mlxsw_core *core, int id,
 }
 
 static int
-mlxsw_env_query_module_eeprom(struct mlxsw_core *mlxsw_core, int module,
-			      u16 offset, u16 size, bool qsfp, bool cmis,
+mlxsw_env_query_module_eeprom(struct mlxsw_core *mlxsw_core, u8 slot_index,
+			      int module, u16 offset, u16 size, bool qsfp, bool cmis,
 			      void *data, unsigned int *p_read_size)
 {
 	char eeprom_tmp[MLXSW_REG_MCIA_EEPROM_SIZE];
@@ -66,6 +67,10 @@ mlxsw_env_query_module_eeprom(struct mlxsw_core *mlxsw_core, int module,
 	int status;
 	int err;
 
+	/* MCIA register accepts buffer size <= 48. Page of size 128 should be
+	 * read by chunks of size 48, 48, 32. Align the size of the last chunk
+	 * to avoid reading after the end of the page.
+	 */
 	size = min_t(u16, size, MLXSW_REG_MCIA_EEPROM_SIZE);
 
 	if (offset < MLXSW_REG_MCIA_EEPROM_PAGE_LENGTH &&
@@ -76,12 +81,22 @@ mlxsw_env_query_module_eeprom(struct mlxsw_core *mlxsw_core, int module,
 	i2c_addr = MLXSW_REG_MCIA_I2C_ADDR_LOW;
 	if (offset >= MLXSW_REG_MCIA_EEPROM_PAGE_LENGTH) {
 		if (qsfp) {
+			/* When reading upper pages 1, 2 and 3 the offset
+			 * starts at 128. Please refer to "QSFP+ Memory Map"
+			 * figure in SFF-8436 specification and to "CMIS Module
+			 * Memory Map" figure in CMIS specification for
+			 * graphical depiction.
+			 */
 			page = MLXSW_REG_MCIA_PAGE_GET(offset);
 			offset -= MLXSW_REG_MCIA_EEPROM_UP_PAGE_LENGTH * page;
 			if (offset + size > MLXSW_REG_MCIA_EEPROM_PAGE_LENGTH)
-				size = MLXSW_REG_MCIA_EEPROM_PAGE_LENGTH -
-				       offset;
+				size = MLXSW_REG_MCIA_EEPROM_PAGE_LENGTH - offset;
 		} else {
+			/* When reading upper pages 1, 2 and 3 the offset
+			 * starts at 0 and I2C high address is used. Please refer
+			 * refer to "Memory Organization" figure in SFF-8472
+			 * specification for graphical depiction.
+			 */
 			i2c_addr = MLXSW_REG_MCIA_I2C_ADDR_HIGH;
 			offset -= MLXSW_REG_MCIA_EEPROM_PAGE_LENGTH;
 		}
@@ -89,7 +104,8 @@ mlxsw_env_query_module_eeprom(struct mlxsw_core *mlxsw_core, int module,
 
 	if (cmis)
 		page = MLXSW_ENV_PAGE_MAP(page);
-	mlxsw_reg_mcia_pack(mcia_pl, module, 0, page, offset, size, i2c_addr);
+	mlxsw_reg_mcia_pack(mcia_pl, slot_index, module, 0, page, offset, size,
+			    i2c_addr);
 
 	err = mlxsw_reg_query(mlxsw_core, MLXSW_REG(mcia), mcia_pl);
 	if (err)
@@ -106,8 +122,8 @@ mlxsw_env_query_module_eeprom(struct mlxsw_core *mlxsw_core, int module,
 	return 0;
 }
 
-int mlxsw_env_module_temp_thresholds_get(struct mlxsw_core *core, int module,
-					 int off, int *temp)
+int mlxsw_env_module_temp_thresholds_get(struct mlxsw_core *core, u8 slot_index,
+					 int module, int off, int *temp)
 {
 	char eeprom_tmp[MLXSW_REG_MCIA_EEPROM_SIZE];
 	union {
@@ -121,8 +137,9 @@ int mlxsw_env_module_temp_thresholds_get(struct mlxsw_core *core, int module,
 	int page;
 	int err;
 
-	mlxsw_reg_mtmp_pack(mtmp_pl, MLXSW_REG_MTMP_MODULE_INDEX_MIN + module,
-			    false, false);
+	mlxsw_reg_mtmp_pack(mtmp_pl, slot_index,
+			    MLXSW_REG_MTMP_MODULE_INDEX_MIN + module, false,
+			    false);
 	err = mlxsw_reg_query(core, MLXSW_REG(mtmp), mtmp_pl);
 	if (err)
 		return err;
@@ -142,21 +159,25 @@ int mlxsw_env_module_temp_thresholds_get(struct mlxsw_core *core, int module,
 	 */
 
 	/* Validate module identifier value. */
-	err = mlxsw_env_validate_cable_ident(core, module, &qsfp, &cmis);
+	err = mlxsw_env_validate_cable_ident(core, slot_index, module, &qsfp,
+					     &cmis);
 	if (err)
 		return err;
 
 	if (qsfp) {
+		/* For QSFP/CMIS module-defined thresholds are located in page
+		 * 02h, otherwise in page 03h.
+		 */
 		if (cmis)
 			page = MLXSW_REG_MCIA_TH_PAGE_CMIS_NUM;
 		else
 			page = MLXSW_REG_MCIA_TH_PAGE_NUM;
-		mlxsw_reg_mcia_pack(mcia_pl, module, 0, page,
+		mlxsw_reg_mcia_pack(mcia_pl, slot_index, module, 0, page,
 				    MLXSW_REG_MCIA_TH_PAGE_OFF + off,
 				    MLXSW_REG_MCIA_TH_ITEM_SIZE,
 				    MLXSW_REG_MCIA_I2C_ADDR_LOW);
 	} else {
-		mlxsw_reg_mcia_pack(mcia_pl, module, 0,
+		mlxsw_reg_mcia_pack(mcia_pl, slot_index, module, 0,
 				    MLXSW_REG_MCIA_PAGE0_LO,
 				    off, MLXSW_REG_MCIA_TH_ITEM_SIZE,
 				    MLXSW_REG_MCIA_I2C_ADDR_HIGH);
@@ -173,19 +194,17 @@ int mlxsw_env_module_temp_thresholds_get(struct mlxsw_core *core, int module,
 	return 0;
 }
 
-int mlxsw_env_get_module_info(struct mlxsw_core *mlxsw_core, int module,
-			      struct ethtool_modinfo *modinfo)
+int mlxsw_env_get_module_info(struct mlxsw_core *mlxsw_core, u8 slot_index,
+			      int module, struct ethtool_modinfo *modinfo)
 {
 	u8 module_info[MLXSW_REG_MCIA_EEPROM_MODULE_INFO_SIZE];
 	u16 offset = MLXSW_REG_MCIA_EEPROM_MODULE_INFO_SIZE;
 	u8 module_rev_id, module_id, diag_mon;
 	unsigned int read_size;
-	bool unused = false;
 	int err;
 
-	err = mlxsw_env_query_module_eeprom(mlxsw_core, module, 0, offset,
-					    unused, unused, module_info,
-					    &read_size);
+	err = mlxsw_env_query_module_eeprom(mlxsw_core, slot_index, module, 0, offset,
+					    false, false, module_info, &read_size);
 	if (err)
 		return err;
 
@@ -215,10 +234,9 @@ int mlxsw_env_get_module_info(struct mlxsw_core *mlxsw_core, int module,
 	case MLXSW_REG_MCIA_EEPROM_MODULE_INFO_ID_SFP: /* fall-through */
 	case MLXSW_REG_MCIA_EEPROM_MODULE_INFO_ID_SFP_DD:
 		/* Verify if transceiver provides diagnostic monitoring page */
-		err = mlxsw_env_query_module_eeprom(mlxsw_core, module,
-						    SFP_DIAGMON, 1, unused,
-						    unused, &diag_mon,
-						    &read_size);
+		err = mlxsw_env_query_module_eeprom(mlxsw_core, slot_index,
+						    module, SFP_DIAGMON, 1, false,
+						    false, &diag_mon, &read_size);
 		if (err)
 			return err;
 
@@ -252,8 +270,9 @@ int mlxsw_env_get_module_info(struct mlxsw_core *mlxsw_core, int module,
 EXPORT_SYMBOL(mlxsw_env_get_module_info);
 
 int mlxsw_env_get_module_eeprom(struct net_device *netdev,
-				struct mlxsw_core *mlxsw_core, int module,
-				struct ethtool_eeprom *ee, u8 *data)
+				struct mlxsw_core *mlxsw_core, u8 slot_index,
+				int module, struct ethtool_eeprom *ee,
+				u8 *data)
 {
 	int offset = ee->offset;
 	unsigned int read_size;
@@ -267,12 +286,14 @@ int mlxsw_env_get_module_eeprom(struct net_device *netdev,
 	memset(data, 0, ee->len);
 
 	/* Validate module identifier type. */
-	err = mlxsw_env_validate_cable_ident(mlxsw_core, module, &qsfp, &cmis);
+	err = mlxsw_env_validate_cable_ident(mlxsw_core, slot_index, module,
+					     &qsfp, &cmis);
 	if (err)
 		return err;
 
 	while (i < ee->len) {
-		err = mlxsw_env_query_module_eeprom(mlxsw_core, module, offset,
+		err = mlxsw_env_query_module_eeprom(mlxsw_core, slot_index,
+						    module, offset,
 						    ee->len - i, qsfp, cmis,
 						    data + i, &read_size);
 		if (err) {

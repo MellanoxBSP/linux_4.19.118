@@ -34,6 +34,7 @@ struct mlxsw_m {
 struct mlxsw_m_port {
 	struct net_device *dev;
 	struct mlxsw_m *mlxsw_m;
+	u8 slot_index;
 	u8 local_port;
 	u8 module;
 };
@@ -71,7 +72,8 @@ static int mlxsw_m_get_module_info(struct net_device *netdev,
 	struct mlxsw_m_port *mlxsw_m_port = netdev_priv(netdev);
 	struct mlxsw_core *core = mlxsw_m_port->mlxsw_m->core;
 
-	return mlxsw_env_get_module_info(core, mlxsw_m_port->module, modinfo);
+	return mlxsw_env_get_module_info(core, mlxsw_m_port->slot_index,
+					 mlxsw_m_port->module, modinfo);
 }
 
 static int
@@ -81,8 +83,8 @@ mlxsw_m_get_module_eeprom(struct net_device *netdev, struct ethtool_eeprom *ee,
 	struct mlxsw_m_port *mlxsw_m_port = netdev_priv(netdev);
 	struct mlxsw_core *core = mlxsw_m_port->mlxsw_m->core;
 
-	return mlxsw_env_get_module_eeprom(netdev, core, mlxsw_m_port->module,
-					   ee, data);
+	return mlxsw_env_get_module_eeprom(netdev, core, mlxsw_m_port->slot_index,
+					   mlxsw_m_port->module, ee, data);
 }
 
 static const struct ethtool_ops mlxsw_m_port_ethtool_ops = {
@@ -216,13 +218,13 @@ static int mlxsw_m_ports_create(struct mlxsw_m *mlxsw_m)
 	int i;
 	int err;
 
-	mlxsw_reg_mgpir_pack(mgpir_pl);
+	mlxsw_reg_mgpir_pack(mgpir_pl, 0);
 	err = mlxsw_reg_query(mlxsw_m->core, MLXSW_REG(mgpir), mgpir_pl);
 	if (err)
 		return err;
 
 	mlxsw_reg_mgpir_unpack(mgpir_pl, NULL, NULL, NULL,
-			       &mlxsw_m->max_ports);
+			       &mlxsw_m->max_ports, NULL);
 	if (!mlxsw_m->max_ports)
 		return 0;
 
