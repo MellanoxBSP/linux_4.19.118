@@ -810,7 +810,7 @@ mlxsw_thermal_module_tz_init(struct mlxsw_thermal_module *module_tz)
 		return err;
 	}
 
-	module_tz->mode = THERMAL_DEVICE_DISABLED;
+	module_tz->mode = THERMAL_DEVICE_ENABLED;
 	return 0;
 }
 
@@ -928,7 +928,7 @@ mlxsw_thermal_gearbox_tz_init(struct mlxsw_thermal_module *gearbox_tz)
 	if (IS_ERR(gearbox_tz->tzdev))
 		return PTR_ERR(gearbox_tz->tzdev);
 
-	gearbox_tz->mode = THERMAL_DEVICE_DISABLED;
+	gearbox_tz->mode = THERMAL_DEVICE_ENABLED;
 	return 0;
 }
 
@@ -1098,7 +1098,7 @@ int mlxsw_thermal_init(struct mlxsw_core *core,
 	if (err)
 		goto err_unreg_modules_tzdev;
 
-	thermal->mode = THERMAL_DEVICE_DISABLED;
+	thermal->mode = THERMAL_DEVICE_ENABLED;
 	thermal->initializing = false;
 	*p_thermal = thermal;
 	return 0;
