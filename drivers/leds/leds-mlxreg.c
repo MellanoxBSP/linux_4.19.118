@@ -187,7 +187,7 @@ static int mlxreg_led_config(struct mlxreg_led_priv_data *priv)
 	struct mlxreg_core_data *data = led_pdata->data;
 	struct mlxreg_led_data *led_data;
 	struct led_classdev *led_cdev;
-	int brightness;
+	enum led_brightness brightness;
 	u32 regval;
 	int i;
 	int err;
@@ -228,8 +228,19 @@ static int mlxreg_led_config(struct mlxreg_led_priv_data *priv)
 			brightness = LED_OFF;
 			led_data->base_color = MLXREG_LED_GREEN_SOLID;
 		}
-		sprintf(led_data->led_cdev_name, "%s:%s", "mlxreg",
-			data->label);
+
+		/*
+		 * Id greater than zero is used for LEDs located on replaceable unit,
+		 * like line card or fabric card. In this case Id is set to I2C bus
+		 * number. Otherwise LEDs located on the main board. The field "identity"
+		 * specifies the type of bus connecting line card to the chassis.
+		 */
+		if (priv->pdev->id > 0)
+			sprintf(led_data->led_cdev_name, "%scard%d:%s", led_pdata->identity,
+				priv->pdev->id, data->label);
+		else
+			sprintf(led_data->led_cdev_name, "%s:%s", "mlxreg",
+				data->label);
 		led_cdev->name = led_data->led_cdev_name;
 		led_cdev->brightness = brightness;
 		led_cdev->max_brightness = LED_ON;
