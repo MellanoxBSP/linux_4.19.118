@@ -78,6 +78,7 @@ struct mlxsw_core {
 	struct mlxsw_res res;
 	struct mlxsw_hwmon *hwmon;
 	struct mlxsw_thermal *thermal;
+	struct mlxsw_linecards *linecards;
 	struct mlxsw_qsfp *qsfp;
 	struct mlxsw_core_port *ports;
 	unsigned int max_ports;
@@ -86,6 +87,12 @@ struct mlxsw_core {
 	unsigned long driver_priv[0];
 	/* driver_priv has to be always the last item */
 };
+
+struct mlxsw_linecards *mlxsw_core_linecards(struct mlxsw_core *mlxsw_core)
+{
+	return mlxsw_core->linecards;
+}
+EXPORT_SYMBOL(mlxsw_core_linecards);
 
 #define MLXSW_PORT_MAX_PORTS_DEFAULT	0x40
 
@@ -1047,6 +1054,10 @@ int mlxsw_core_bus_device_register(const struct mlxsw_bus_info *mlxsw_bus_info,
 			goto err_devlink_register;
 	}
 
+	err = mlxsw_linecards_init(mlxsw_core, &mlxsw_core->linecards);
+	if (err)
+		goto err_linecards_init;
+
 	if (mlxsw_driver->init) {
 		err = mlxsw_driver->init(mlxsw_core, mlxsw_bus_info);
 		if (err)
@@ -1058,6 +1069,10 @@ int mlxsw_core_bus_device_register(const struct mlxsw_bus_info *mlxsw_bus_info,
 		if (err)
 			goto err_register_params;
 	}
+
+	err = mlxsw_linecards_post_init(mlxsw_core, mlxsw_core->linecards);
+	if (err)
+		goto err_linecards_post_init;
 
 	err = mlxsw_hwmon_init(mlxsw_core, mlxsw_bus_info, &mlxsw_core->hwmon);
 	if (err)
@@ -1080,10 +1095,16 @@ err_qsfp_init:
 err_thermal_init:
 	mlxsw_hwmon_fini(mlxsw_core->hwmon);
 err_hwmon_init:
+	mlxsw_linecards_pre_fini(mlxsw_core, mlxsw_core->linecards);
+err_linecards_post_init:
 	if (mlxsw_driver->params_unregister && !reload)
 		mlxsw_driver->params_unregister(mlxsw_core);
 err_register_params:
+	if (mlxsw_core->driver->fini)
+		mlxsw_core->driver->fini(mlxsw_core);
 err_driver_init:
+	mlxsw_linecards_fini(mlxsw_core, mlxsw_core->linecards);
+err_linecards_init:
 	if (!reload)
 		devlink_unregister(devlink);
 err_devlink_register:
@@ -1123,12 +1144,14 @@ void mlxsw_core_bus_device_unregister(struct mlxsw_core *mlxsw_core,
 	mlxsw_qsfp_fini(mlxsw_core->qsfp);
 	mlxsw_thermal_fini(mlxsw_core->thermal);
 	mlxsw_hwmon_fini(mlxsw_core->hwmon);
+	mlxsw_linecards_pre_fini(mlxsw_core, mlxsw_core->linecards);
 	if (mlxsw_core->driver->fini)
 		mlxsw_core->driver->fini(mlxsw_core);
 	if (mlxsw_core->driver->params_unregister && !reload)
 		mlxsw_core->driver->params_unregister(mlxsw_core);
 	if (!reload)
 		devlink_unregister(devlink);
+	mlxsw_linecards_fini(mlxsw_core, mlxsw_core->linecards);
 	mlxsw_emad_fini(mlxsw_core);
 	kfree(mlxsw_core->lag.mapping);
 	mlxsw_ports_fini(mlxsw_core);

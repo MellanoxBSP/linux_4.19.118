@@ -28,6 +28,8 @@ unsigned int mlxsw_core_max_ports(const struct mlxsw_core *mlxsw_core);
 
 void *mlxsw_core_driver_priv(struct mlxsw_core *mlxsw_core);
 
+struct mlxsw_linecards *mlxsw_core_linecards(struct mlxsw_core *mlxsw_core);
+
 bool mlxsw_core_res_query_enabled(const struct mlxsw_core *mlxsw_core);
 
 int mlxsw_core_driver_register(struct mlxsw_driver *mlxsw_driver);
@@ -403,6 +405,55 @@ enum mlxsw_devlink_param_id {
 	MLXSW_DEVLINK_PARAM_ID_BASE = DEVLINK_PARAM_GENERIC_ID_MAX,
 	MLXSW_DEVLINK_PARAM_ID_ACL_REGION_REHASH_INTERVAL,
 };
+
+struct mlxsw_linecard {
+	u8 slot_index;
+	struct mlxsw_linecards *linecards;
+	struct devlink_linecard *devlink_linecard;
+	bool provisioned;
+	bool ready;
+	bool active;
+};
+
+struct mlxsw_linecards {
+	struct list_head event_ops_list;
+	struct mlxsw_core *mlxsw_core;
+	u8 count;
+	struct mlxsw_linecard linecards[0];
+};
+
+static inline struct mlxsw_linecard *
+mlxsw_linecard_get(struct mlxsw_linecards *linecards, u8 slot_index)
+{
+	return &linecards->linecards[slot_index - 1];
+}
+
+int mlxsw_linecards_init(struct mlxsw_core *mlxsw_core,
+			 struct mlxsw_linecards **p_linecards);
+int mlxsw_linecards_post_init(struct mlxsw_core *mlxsw_core,
+			      struct mlxsw_linecards *linecards);
+void mlxsw_linecards_pre_fini(struct mlxsw_core *mlxsw_core,
+			      struct mlxsw_linecards *linecards);
+void mlxsw_linecards_fini(struct mlxsw_core *mlxsw_core,
+			  struct mlxsw_linecards *linecards);
+int mlxsw_linecard_status_process(struct mlxsw_core *mlxsw_core,
+				  const char *mddq_pl);
+
+struct mlxsw_linecards_event_ops {
+	void (*got_active)(struct mlxsw_core *mlxsw_core, u8 slot_index,
+			   const struct mlxsw_linecard *linecard,
+			   void *priv);
+	void (*got_inactive)(struct mlxsw_core *mlxsw_core, u8 slot_index,
+			     const struct mlxsw_linecard *linecard,
+			     void *priv);
+};
+
+int mlxsw_linecards_event_ops_register(struct mlxsw_core *mlxsw_core,
+				       struct mlxsw_linecards_event_ops *ops,
+				       void *priv);
+void mlxsw_linecards_event_ops_unregister(struct mlxsw_core *mlxsw_core,
+					  struct mlxsw_linecards_event_ops *ops,
+					  void *priv);
 
 struct mlxsw_qsfp;
 
