@@ -9,6 +9,7 @@
 #include <linux/mutex.h>
 #include <linux/module.h>
 #include <linux/mod_devicetable.h>
+#include <linux/platform_data/mlxreg.h>
 #include <linux/slab.h>
 
 #include "cmd.h"
@@ -62,6 +63,10 @@
  * @core: switch core pointer;
  * @bus_info: bus info block;
  * @block_size: maximum block size allowed to pass to under layer;
+ * @pdata: device platform data;
+ * @dwork_irq: interrupts delayed work queue;
+ * @lock - lock for interrupts sync;
+ * @sys_event_handler: system events handler callback;
  */
 struct mlxsw_i2c {
 	struct {
@@ -75,6 +80,10 @@ struct mlxsw_i2c {
 	struct mlxsw_core *core;
 	struct mlxsw_bus_info bus_info;
 	u16 block_size;
+	struct mlxreg_core_hotplug_platform_data *pdata;
+	struct delayed_work dwork_irq;
+	spinlock_t lock; /* sync with interrupt */
+	void (*sys_event_handler)(struct mlxsw_core *mlxsw_core);
 };
 
 #define MLXSW_I2C_READ_MSG(_client, _addr_buf, _buf, _len) {	\
@@ -508,13 +517,15 @@ static int mlxsw_i2c_skb_transmit(void *bus_priv, struct sk_buff *skb,
 static int
 mlxsw_i2c_init(void *bus_priv, struct mlxsw_core *mlxsw_core,
 	       const struct mlxsw_config_profile *profile,
-	       struct mlxsw_res *res)
+	       struct mlxsw_res *res,
+	       void (*sys_event_handler)(struct mlxsw_core *mlxsw_core))
 {
 	struct mlxsw_i2c *mlxsw_i2c = bus_priv;
 	char *mbox;
 	int err;
 
 	mlxsw_i2c->core = mlxsw_core;
+	mlxsw_i2c->sys_event_handler = sys_event_handler;
 
 	mbox = mlxsw_cmd_mbox_alloc();
 	if (!mbox)
@@ -543,6 +554,71 @@ static void mlxsw_i2c_fini(void *bus_priv)
 	struct mlxsw_i2c *mlxsw_i2c = bus_priv;
 
 	mlxsw_i2c->core = NULL;
+}
+
+static void mlxsw_i2c_work_handler(struct work_struct *work)
+{
+	struct mlxsw_i2c *mlxsw_i2c;
+	unsigned long flags;
+
+	mlxsw_i2c = container_of(work, struct mlxsw_i2c, dwork_irq.work);
+	mlxsw_i2c->sys_event_handler(mlxsw_i2c->core);
+
+	spin_lock_irqsave(&mlxsw_i2c->lock, flags);
+
+	/* It is possible, that some signals have been inserted, while
+	 * interrupts has been masked. In this case such signals could be missed.
+	 * In order to handle these signals delayed work is canceled and work task
+	 * re-scheduled for immediate execution. It allows to handle missed
+	 * signals, if any. In other case work handler just validates that no new
+	 * signals have been received during masking.
+	 */
+	cancel_delayed_work(&mlxsw_i2c->dwork_irq);
+	schedule_delayed_work(&mlxsw_i2c->dwork_irq, 0);
+
+	spin_unlock_irqrestore(&mlxsw_i2c->lock, flags);
+}
+
+static irqreturn_t mlxsw_i2c_irq_handler(int irq, void *dev)
+{
+	struct mlxsw_i2c *mlxsw_i2c = (struct mlxsw_i2c *)dev;
+
+	/* Schedule work task for immediate execution.*/
+	schedule_delayed_work(&mlxsw_i2c->dwork_irq, 0);
+
+	return IRQ_HANDLED;
+}
+
+static int mlxsw_i2c_event_handler_register(struct mlxsw_i2c *mlxsw_i2c)
+{
+	int err;
+
+	/* Initialize interrupt handler if system hotplug driver is reachable
+	 * and platform data is available.
+	 */
+	if (!IS_REACHABLE(CONFIG_MLXREG_HOTPLUG) || !mlxsw_i2c->pdata || !mlxsw_i2c->pdata->irq)
+		return 0;
+
+	err = devm_request_irq(mlxsw_i2c->dev, mlxsw_i2c->pdata->irq, mlxsw_i2c_irq_handler,
+			       IRQF_TRIGGER_FALLING | IRQF_SHARED, "mlxsw-i2c", mlxsw_i2c);
+	if (err) {
+		dev_err(mlxsw_i2c->bus_info.dev, "Failed to request irq: %d\n",
+			err);
+		return err;
+	}
+
+	spin_lock_init(&mlxsw_i2c->lock);
+	INIT_DELAYED_WORK(&mlxsw_i2c->dwork_irq, mlxsw_i2c_work_handler);
+
+	return 0;
+}
+
+static void mlxsw_i2c_event_handler_unregister(struct mlxsw_i2c *mlxsw_i2c)
+{
+	if (!IS_REACHABLE(CONFIG_MLXREG_HOTPLUG) || !mlxsw_i2c->pdata || !mlxsw_i2c->pdata->irq)
+		return;
+
+	devm_free_irq(mlxsw_i2c->bus_info.dev, mlxsw_i2c->pdata->irq, mlxsw_i2c);
 }
 
 static const struct mlxsw_bus mlxsw_i2c_bus = {
@@ -637,6 +713,7 @@ static int mlxsw_i2c_probe(struct i2c_client *client,
 	mlxsw_i2c->bus_info.dev = &client->dev;
 	mlxsw_i2c->bus_info.low_frequency = true;
 	mlxsw_i2c->dev = &client->dev;
+	mlxsw_i2c->pdata = client->dev.platform_data;
 
 	err = mlxsw_core_bus_device_register(&mlxsw_i2c->bus_info,
 					     &mlxsw_i2c_bus, mlxsw_i2c, false,
@@ -645,6 +722,10 @@ static int mlxsw_i2c_probe(struct i2c_client *client,
 		dev_err(&client->dev, "Fail to register core bus\n");
 		return err;
 	}
+
+	err = mlxsw_i2c_event_handler_register(mlxsw_i2c);
+	if (err)
+		return err;
 
 	dev_info(&client->dev, "Firmware revision: %d.%d.%d\n",
 		 mlxsw_i2c->bus_info.fw_rev.major,
@@ -663,6 +744,7 @@ static int mlxsw_i2c_remove(struct i2c_client *client)
 {
 	struct mlxsw_i2c *mlxsw_i2c = i2c_get_clientdata(client);
 
+	mlxsw_i2c_event_handler_unregister(mlxsw_i2c);
 	mlxsw_core_bus_device_unregister(mlxsw_i2c->core, false);
 	mutex_destroy(&mlxsw_i2c->cmd.lock);
 

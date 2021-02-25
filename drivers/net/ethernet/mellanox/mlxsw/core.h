@@ -290,6 +290,7 @@ struct mlxsw_driver {
 			     u64 *p_linear_size);
 	int (*params_register)(struct mlxsw_core *mlxsw_core);
 	void (*params_unregister)(struct mlxsw_core *mlxsw_core);
+	void (*sys_event_handler)(struct mlxsw_core *mlxsw_core);
 	u8 txhdr_len;
 	const struct mlxsw_config_profile *profile;
 	bool res_query_enabled;
@@ -322,7 +323,8 @@ struct mlxsw_bus {
 	const char *kind;
 	int (*init)(void *bus_priv, struct mlxsw_core *mlxsw_core,
 		    const struct mlxsw_config_profile *profile,
-		    struct mlxsw_res *res);
+		    struct mlxsw_res *res,
+		    void (*sys_event_handler)(struct mlxsw_core *mlxsw_core));
 	void (*fini)(void *bus_priv);
 	bool (*skb_transmit_busy)(void *bus_priv,
 				  const struct mlxsw_tx_info *tx_info);

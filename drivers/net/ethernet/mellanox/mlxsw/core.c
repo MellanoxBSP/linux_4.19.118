@@ -1018,7 +1018,8 @@ int mlxsw_core_bus_device_register(const struct mlxsw_bus_info *mlxsw_bus_info,
 	mlxsw_core->bus_info = mlxsw_bus_info;
 
 	res = mlxsw_driver->res_query_enabled ? &mlxsw_core->res : NULL;
-	err = mlxsw_bus->init(bus_priv, mlxsw_core, mlxsw_driver->profile, res);
+	err = mlxsw_bus->init(bus_priv, mlxsw_core, mlxsw_driver->profile, res,
+			      mlxsw_driver->sys_event_handler);
 	if (err)
 		goto err_bus_init;
 

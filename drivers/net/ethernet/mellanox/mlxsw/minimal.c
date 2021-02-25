@@ -287,6 +287,26 @@ static void mlxsw_m_ports_remove(struct mlxsw_m_area *mlxsw_m_area)
 	kfree(mlxsw_m_area->ports);
 }
 
+static void mlxsw_m_sys_event_handler(struct mlxsw_core *mlxsw_core)
+{
+	struct mlxsw_m *mlxsw_m = mlxsw_core_driver_priv(mlxsw_core);
+	struct mlxsw_linecards *linecards = mlxsw_core_linecards(mlxsw_core);
+	char mddq_pl[MLXSW_REG_MDDQ_LEN];
+	int i, err;
+
+	/* Handle line cards, for which active status has been changed. */
+	for (i = 1; i <= linecards->count; i++) {
+		mlxsw_reg_mddq_pack(mddq_pl, MLXSW_REG_MDDQ_QUERY_TYPE_SLOT_INFO,
+				    false, i);
+		err = mlxsw_reg_query(mlxsw_m->core, MLXSW_REG(mddq), mddq_pl);
+		if (err)
+			dev_err(mlxsw_m->bus_info->dev, "Fail to query MDDQ register for slot %d\n",
+				i);
+
+		mlxsw_linecard_status_process(mlxsw_m->core, mddq_pl);
+	}
+}
+
 static int mlxsw_m_init(struct mlxsw_core *mlxsw_core,
 			const struct mlxsw_bus_info *mlxsw_bus_info)
 {
@@ -328,6 +348,7 @@ static struct mlxsw_driver mlxsw_m_driver = {
 	.priv_size		= sizeof(struct mlxsw_m),
 	.init			= mlxsw_m_init,
 	.fini			= mlxsw_m_fini,
+	.sys_event_handler	= mlxsw_m_sys_event_handler,
 	.profile		= &mlxsw_m_config_profile,
 	.res_query_enabled	= true,
 };
