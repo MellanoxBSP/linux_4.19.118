@@ -128,6 +128,7 @@ struct mlxsw_thermal {
 	struct mlxsw_thermal_trip trips[MLXSW_THERMAL_NUM_TRIPS];
 	enum thermal_device_mode mode;
 	struct mlxsw_thermal_area *main;
+	struct mlxsw_thermal_area **linecards;
 	unsigned int tz_highest_score;
 	struct thermal_zone_device *tz_highest_dev;
 	bool initializing; /* Driver is in initialization stage */
@@ -1059,6 +1060,97 @@ mlxsw_thermal_gearboxes_fini(struct mlxsw_thermal *thermal,
 		mlxsw_thermal_gearbox_tz_fini(&area->tz_gearbox_arr[i]);
 }
 
+static void
+mlxsw_thermal_got_active(struct mlxsw_core *mlxsw_core, u8 slot_index,
+			 const struct mlxsw_linecard *linecard, void *priv)
+{
+	struct mlxsw_thermal *thermal = priv;
+	struct mlxsw_thermal_area *area = thermal->linecards[slot_index];
+	struct mlxsw_env_gearbox_sensors_map map;
+	int err;
+
+	err = mlxsw_thermal_modules_init(thermal->bus_info->dev, thermal->core,
+					 thermal, area);
+	if (err)
+		goto err_thermal_linecard_modules_init;
+
+	map.sensor_bit_map = area->gearbox_sensor_map;
+	err = mlxsw_env_sensor_map_create(thermal->core, thermal->bus_info,
+					  linecard->slot_index, &map);
+	if (err)
+		goto err_thermal_linecard_env_sensor_map_create;
+
+	err = mlxsw_thermal_gearboxes_init(thermal->bus_info->dev, thermal->core,
+					   thermal, area);
+	if (err)
+		goto err_thermal_linecard_gearboxes_init;
+
+	return;
+
+err_thermal_linecard_gearboxes_init:
+	mlxsw_env_sensor_map_destroy(thermal->bus_info,
+				     area->gearbox_sensor_map);
+err_thermal_linecard_env_sensor_map_create:
+	mlxsw_thermal_modules_fini(thermal, area);
+err_thermal_linecard_modules_init:
+	devm_kfree(thermal->bus_info->dev, area);
+}
+
+static void mlxsw_thermal_got_inactive(struct mlxsw_core *mlxsw_core, u8 slot_index,
+				       const struct mlxsw_linecard *linecard, void *priv)
+{
+	struct mlxsw_thermal *thermal = priv;
+	struct mlxsw_thermal_area *area = thermal->linecards[slot_index];
+
+	mlxsw_thermal_gearboxes_fini(thermal, area);
+	mlxsw_env_sensor_map_destroy(thermal->bus_info,
+				     area->gearbox_sensor_map);
+	mlxsw_thermal_modules_fini(thermal, area);
+	devm_kfree(thermal->bus_info->dev, area);
+}
+
+static struct mlxsw_linecards_event_ops mlxsw_thermal_event_ops = {
+	.got_active = mlxsw_thermal_got_active,
+	.got_inactive = mlxsw_thermal_got_inactive,
+};
+
+static int mlxsw_thermal_linecards_register(struct mlxsw_core *mlxsw_core,
+					    struct mlxsw_thermal *thermal)
+{
+	struct mlxsw_linecards *linecards = mlxsw_core_linecards(mlxsw_core);
+	int err;
+
+	if (!linecards || !linecards->count)
+		return 0;
+
+	thermal->linecards = kcalloc(linecards->count, sizeof(*thermal->linecards),
+				     GFP_KERNEL);
+	if (!thermal->linecards)
+		return -ENOMEM;
+
+	err = mlxsw_linecards_event_ops_register(mlxsw_core,
+						 &mlxsw_thermal_event_ops,
+						 thermal);
+	if (err)
+		goto err_linecards_event_ops_register;
+
+err_linecards_event_ops_register:
+	kfree(thermal->linecards);
+	return err;
+}
+
+static void mlxsw_thermal_linecards_unregister(struct mlxsw_thermal *thermal)
+{
+	struct mlxsw_linecards *linecards = mlxsw_core_linecards(thermal->core);
+
+	if (!linecards || !linecards->count)
+		return;
+
+	mlxsw_linecards_event_ops_unregister(thermal->core,
+					     &mlxsw_thermal_event_ops, thermal);
+	kfree(thermal->linecards);
+}
+
 int mlxsw_thermal_init(struct mlxsw_core *core,
 		       const struct mlxsw_bus_info *bus_info,
 		       struct mlxsw_thermal **p_thermal)
@@ -1164,11 +1256,16 @@ int mlxsw_thermal_init(struct mlxsw_core *core,
 	if (err)
 		goto err_thermal_gearboxes_init;
 
+	err = mlxsw_thermal_linecards_register(core, thermal);
+	if (err)
+		goto err_linecards_register;
+
 	thermal->mode = THERMAL_DEVICE_ENABLED;
 	thermal->initializing = false;
 	*p_thermal = thermal;
 	return 0;
 
+err_linecards_register:
 err_thermal_gearboxes_init:
 	mlxsw_thermal_gearboxes_main_fini(thermal->main);
 err_thermal_gearboxes_main_init:
@@ -1195,6 +1292,7 @@ void mlxsw_thermal_fini(struct mlxsw_thermal *thermal)
 {
 	int i;
 
+	mlxsw_thermal_linecards_unregister(thermal);
 	mlxsw_thermal_gearboxes_fini(thermal, thermal->main);
 	mlxsw_thermal_gearboxes_main_fini(thermal->main);
 	mlxsw_thermal_modules_fini(thermal, thermal->main);
