@@ -61,6 +61,7 @@ struct mlxsw_hwmon {
 	struct mlxsw_core *core;
 	const struct mlxsw_bus_info *bus_info;
 	struct mlxsw_hwmon_dev *main;
+	struct mlxsw_hwmon_dev **linecards;
 };
 
 static ssize_t mlxsw_hwmon_temp_show(struct device *dev,
@@ -726,6 +727,108 @@ mlxsw_hwmon_gearbox_init(struct mlxsw_hwmon_dev *mlxsw_hwmon_dev, u8 gbox_num)
 	return 0;
 }
 
+static void
+mlxsw_hwmon_got_active(struct mlxsw_core *mlxsw_core, u8 slot_index,
+		       const struct mlxsw_linecard *linecard, void *priv)
+{
+	struct mlxsw_hwmon *hwmon = priv;
+	struct mlxsw_hwmon_dev *lc = hwmon->linecards[slot_index - 1];
+	struct device *dev = hwmon->bus_info->dev;
+	struct mlxsw_env_gearbox_sensors_map map;
+	int err;
+
+	err = mlxsw_hwmon_module_init(lc);
+	if (err)
+		goto err_hwmon_linecard_module_init;
+
+	map.sensor_bit_map = lc->gearbox_sensor_map;
+	err = mlxsw_env_sensor_map_create(hwmon->core,
+					  hwmon->bus_info, slot_index,
+					  &map);
+	if (err)
+		goto err_hwmon_linecard_env_sensor_map_create;
+
+	err = mlxsw_hwmon_gearbox_init(lc, map.sensor_count);
+	if (err)
+		goto err_hwmon_linecard_gearbox_init;
+
+	lc->groups[0] = &lc->group;
+	lc->group.attrs = lc->attrs;
+	lc->slot_index = slot_index;
+	sprintf(lc->name, "%s#%02u", "linecard", slot_index);
+	lc->hwmon_dev = hwmon_device_register_with_groups(dev, (const char *) lc->name,
+							  lc, lc->groups);
+	if (IS_ERR(lc->hwmon_dev)) {
+		err = PTR_ERR(lc->hwmon_dev);
+		goto err_hwmon_linecard_register;
+	}
+
+	return;
+
+err_hwmon_linecard_register:
+err_hwmon_linecard_gearbox_init:
+	mlxsw_env_sensor_map_destroy(hwmon->bus_info,
+				     lc->gearbox_sensor_map);
+err_hwmon_linecard_env_sensor_map_create:
+err_hwmon_linecard_module_init:
+	return;
+}
+
+static void
+mlxsw_hwmon_got_inactive(struct mlxsw_core *mlxsw_core, u8 slot_index,
+			 const struct mlxsw_linecard *linecard, void *priv)
+{
+	struct mlxsw_hwmon *hwmon = priv;
+	struct mlxsw_hwmon_dev *lc = hwmon->linecards[slot_index - 1];
+
+	if (lc->hwmon_dev)
+		hwmon_device_unregister(lc->hwmon_dev);
+	mlxsw_env_sensor_map_destroy(hwmon->bus_info,
+				     lc->gearbox_sensor_map);
+	hwmon->linecards[slot_index - 1] = NULL;
+}
+
+static struct mlxsw_linecards_event_ops mlxsw_hwmon_event_ops = {
+	.got_active = mlxsw_hwmon_got_active,
+	.got_inactive = mlxsw_hwmon_got_inactive,
+};
+
+static int mlxsw_hwmon_linecards_register(struct mlxsw_hwmon *hwmon)
+{
+	struct mlxsw_linecards *linecards = mlxsw_core_linecards(hwmon->core);
+	int err;
+
+	if (!linecards || !linecards->count)
+		return 0;
+
+	hwmon->linecards = kcalloc(linecards->count, sizeof(*hwmon->linecards),
+				   GFP_KERNEL);
+	if (!hwmon->linecards)
+		return -ENOMEM;
+
+	err = mlxsw_linecards_event_ops_register(hwmon->core,
+						 &mlxsw_hwmon_event_ops,
+						 hwmon);
+	if (err)
+		goto err_linecards_event_ops_register;
+
+err_linecards_event_ops_register:
+	kfree(hwmon->linecards);
+	return err;
+}
+
+static void mlxsw_hwmon_linecards_unregister(struct mlxsw_hwmon *hwmon)
+{
+	struct mlxsw_linecards *linecards = mlxsw_core_linecards(hwmon->core);
+
+	if (!linecards || !linecards->count)
+		return;
+
+	mlxsw_linecards_event_ops_unregister(hwmon->core,
+					     &mlxsw_hwmon_event_ops, hwmon);
+	kfree(hwmon->linecards);
+}
+
 int mlxsw_hwmon_init(struct mlxsw_core *mlxsw_core,
 		     const struct mlxsw_bus_info *mlxsw_bus_info,
 		     struct mlxsw_hwmon **p_hwmon)
@@ -778,10 +881,16 @@ int mlxsw_hwmon_init(struct mlxsw_core *mlxsw_core,
 		goto err_hwmon_register;
 	}
 
+	err = mlxsw_hwmon_linecards_register(mlxsw_hwmon);
+	if (err)
+		goto err_linecards_register;
+
 	mlxsw_hwmon->main->hwmon_dev = hwmon_dev;
 	*p_hwmon = mlxsw_hwmon;
 	return 0;
 
+err_linecards_register:
+	hwmon_device_unregister(mlxsw_hwmon->main->hwmon_dev);
 err_hwmon_register:
 err_gearbox_init:
 	mlxsw_hwmon_gearbox_main_fini(mlxsw_hwmon->main);
@@ -797,6 +906,7 @@ err_hwmon_main_init:
 
 void mlxsw_hwmon_fini(struct mlxsw_hwmon *mlxsw_hwmon)
 {
+	mlxsw_hwmon_linecards_unregister(mlxsw_hwmon);
 	hwmon_device_unregister(mlxsw_hwmon->main->hwmon_dev);
 	mlxsw_hwmon_gearbox_main_fini(mlxsw_hwmon->main);
 	kfree(mlxsw_hwmon->main);
