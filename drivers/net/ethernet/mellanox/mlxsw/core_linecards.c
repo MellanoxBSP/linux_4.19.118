@@ -59,6 +59,28 @@ static void mlxsw_linecard_got_inactive(struct mlxsw_core *mlxsw_core,
 					      linecard, item->priv);
 }
 
+static void mlxsw_linecard_got_ready(struct mlxsw_core *mlxsw_core,
+				     struct mlxsw_linecards *linecards,
+				     struct mlxsw_linecard *linecard)
+{
+	struct mlxsw_linecards_event_ops_item *item;
+
+	list_for_each_entry(item, &linecards->event_ops_list, list)
+		item->event_ops->got_ready(mlxsw_core, linecard->slot_index,
+					    linecard, item->priv);
+}
+
+static void mlxsw_linecard_got_unready(struct mlxsw_core *mlxsw_core,
+				       struct mlxsw_linecards *linecards,
+				       struct mlxsw_linecard *linecard)
+{
+	struct mlxsw_linecards_event_ops_item *item;
+
+	list_for_each_entry(item, &linecards->event_ops_list, list)
+		item->event_ops->got_unready(mlxsw_core, linecard->slot_index,
+					     linecard, item->priv);
+}
+
 static int __mlxsw_linecard_status_process(struct mlxsw_core *mlxsw_core,
 					   struct mlxsw_linecards *linecards,
 					   struct mlxsw_linecard *linecard,
@@ -104,6 +126,12 @@ static int __mlxsw_linecard_status_process(struct mlxsw_core *mlxsw_core,
 			err = mlxsw_linecard_activate(mlxsw_core, linecard);
 			if (err)
 				return err;
+
+			mlxsw_linecard_got_ready(mlxsw_core,
+						 linecards, linecard);
+		} else {
+			mlxsw_linecard_got_unready(mlxsw_core,
+						   linecards, linecard);
 		}
 		linecard->ready = ready;
 	}

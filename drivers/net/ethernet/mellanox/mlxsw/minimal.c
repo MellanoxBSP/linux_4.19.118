@@ -28,6 +28,7 @@ struct mlxsw_m {
 	const struct mlxsw_bus_info *bus_info;
 	u8 base_mac[ETH_ALEN];
 	struct mlxsw_m_area *main;
+	struct mlxsw_m_area **linecards;
 };
 
 struct mlxsw_m_area {
@@ -307,6 +308,74 @@ static void mlxsw_m_sys_event_handler(struct mlxsw_core *mlxsw_core)
 	}
 }
 
+static void
+mlxsw_m_got_ready(struct mlxsw_core *mlxsw_core, u8 slot_index,
+		  const struct mlxsw_linecard *linecard, void *priv)
+{
+	struct mlxsw_m *mlxsw_m = priv;
+	struct mlxsw_m_area *mlxsw_m_area = mlxsw_m->linecards[slot_index - 1];
+	int err;
+
+	err = mlxsw_m_ports_create(mlxsw_m_area, slot_index);
+	if (err) {
+		dev_err(mlxsw_m->bus_info->dev, "Failed to create ports for line card at slot %d\n",
+			slot_index);
+	}
+}
+
+static void
+mlxsw_m_got_unready(struct mlxsw_core *mlxsw_core, u8 slot_index,
+		    const struct mlxsw_linecard *linecard, void *priv)
+{
+	struct mlxsw_m *mlxsw_m = priv;
+	struct mlxsw_m_area *mlxsw_m_area = mlxsw_m->linecards[slot_index - 1];
+
+	mlxsw_m_ports_remove(mlxsw_m_area);
+}
+
+static struct mlxsw_linecards_event_ops mlxsw_m_event_ops = {
+	.got_ready = mlxsw_m_got_ready,
+	.got_unready = mlxsw_m_got_unready,
+};
+
+static int mlxsw_m_linecards_register(struct mlxsw_m *mlxsw_m)
+{
+	struct mlxsw_linecards *linecards = mlxsw_core_linecards(mlxsw_m->core);
+	int err;
+
+	if (!linecards || !linecards->count)
+		return 0;
+
+	mlxsw_m->linecards = kcalloc(linecards->count, sizeof(*mlxsw_m->linecards),
+				     GFP_KERNEL);
+	if (!mlxsw_m->linecards)
+		return -ENOMEM;
+
+	err = mlxsw_linecards_event_ops_register(mlxsw_m->core,
+						 &mlxsw_m_event_ops,
+						 mlxsw_m);
+	if (err)
+		goto err_linecards_event_ops_register;
+
+	return 0;
+
+err_linecards_event_ops_register:
+	kfree(mlxsw_m->linecards);
+	return err;
+}
+
+static void mlxsw_m_linecards_unregister(struct mlxsw_m *mlxsw_m)
+{
+	struct mlxsw_linecards *linecards = mlxsw_core_linecards(mlxsw_m->core);
+
+	if (!linecards || !linecards->count)
+		return;
+
+	mlxsw_linecards_event_ops_unregister(mlxsw_m->core,
+					     &mlxsw_m_event_ops, mlxsw_m);
+	kfree(mlxsw_m->linecards);
+}
+
 static int mlxsw_m_init(struct mlxsw_core *mlxsw_core,
 			const struct mlxsw_bus_info *mlxsw_bus_info)
 {
@@ -331,13 +400,22 @@ static int mlxsw_m_init(struct mlxsw_core *mlxsw_core,
 		return err;
 	}
 
+	err = mlxsw_m_linecards_register(mlxsw_m);
+	if (err)
+		goto err_linecards_register;
+
 	return 0;
+
+err_linecards_register:
+	mlxsw_m_ports_remove(mlxsw_m->main);
+	return err;
 }
 
 static void mlxsw_m_fini(struct mlxsw_core *mlxsw_core)
 {
 	struct mlxsw_m *mlxsw_m = mlxsw_core_driver_priv(mlxsw_core);
 
+	mlxsw_m_linecards_unregister(mlxsw_m);
 	mlxsw_m_ports_remove(mlxsw_m->main);
 }
 

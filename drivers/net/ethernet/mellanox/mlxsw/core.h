@@ -448,6 +448,12 @@ struct mlxsw_linecards_event_ops {
 	void (*got_inactive)(struct mlxsw_core *mlxsw_core, u8 slot_index,
 			     const struct mlxsw_linecard *linecard,
 			     void *priv);
+	void (*got_ready)(struct mlxsw_core *mlxsw_core, u8 slot_index,
+			  const struct mlxsw_linecard *linecard,
+			  void *priv);
+	void (*got_unready)(struct mlxsw_core *mlxsw_core, u8 slot_index,
+			    const struct mlxsw_linecard *linecard,
+			    void *priv);
 };
 
 int mlxsw_linecards_event_ops_register(struct mlxsw_core *mlxsw_core,
