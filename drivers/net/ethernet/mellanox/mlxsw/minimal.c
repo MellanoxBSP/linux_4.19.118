@@ -30,6 +30,7 @@ struct mlxsw_m {
 	struct mlxsw_m_area *main;
 	struct mlxsw_m_area **linecards;
 	u8 max_ports;
+	u8 max_modules_per_slot;
 };
 
 struct mlxsw_m_area {
@@ -123,6 +124,10 @@ mlxsw_m_port_dev_addr_get(struct mlxsw_m_port *mlxsw_m_port)
 	 * value.
 	 */
 	dev->dev_addr[ETH_ALEN - 1] = mlxsw_m_port->module + 1;
+	/* Add MAC address offset for slot. */
+	if (mlxsw_m_port->slot_index)
+		dev->dev_addr[ETH_ALEN - 1] += (mlxsw_m_port->slot_index - 1) *
+					       mlxsw_m->max_modules_per_slot;
 	return 0;
 }
 
@@ -239,8 +244,13 @@ static int mlxsw_m_ports_create(struct mlxsw_m_area *mlxsw_m_area, u8 slot_index
 	if (err)
 		return err;
 
-	mlxsw_reg_mgpir_unpack(mgpir_pl, NULL, NULL, NULL,
-			       &mlxsw_m_area->max_ports, NULL, NULL);
+	if (slot_index)
+		mlxsw_reg_mgpir_unpack(mgpir_pl, NULL, NULL, NULL,
+				       &mlxsw_m_area->max_ports, NULL, NULL);
+	else
+		mlxsw_reg_mgpir_unpack(mgpir_pl, NULL, NULL, NULL,
+				       &mlxsw_m_area->max_ports, NULL,
+				       &mlxsw_m_area->mlxsw_m->max_modules_per_slot);
 
 	if (!mlxsw_m_area->max_ports)
 		return 0;
