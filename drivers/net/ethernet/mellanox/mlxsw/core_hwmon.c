@@ -611,7 +611,7 @@ static int mlxsw_hwmon_module_init(struct mlxsw_hwmon_dev *mlxsw_hwmon_dev)
 		return err;
 
 	mlxsw_reg_mgpir_unpack(mgpir_pl, NULL, NULL, NULL,
-			       &module_sensor_max, NULL);
+			       &module_sensor_max, NULL, NULL);
 
 	/* Add extra attributes for module temperature. Sensor index is
 	 * assigned to sensor_count value, while all indexed before
@@ -656,7 +656,7 @@ mlxsw_hwmon_gearbox_main_init(struct mlxsw_hwmon_dev *mlxsw_hwmon_dev,
 		return err;
 
 	mlxsw_reg_mgpir_unpack(mgpir_pl, gbox_num, &device_type, NULL, NULL,
-			       NULL);
+			       NULL, NULL);
 	if (device_type != MLXSW_REG_MGPIR_DEVICE_TYPE_GEARBOX_DIE)
 		*gbox_num = 0;
 

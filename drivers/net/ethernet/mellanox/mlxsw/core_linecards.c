@@ -266,7 +266,7 @@ int mlxsw_linecards_init(struct mlxsw_core *mlxsw_core,
 		return err;
 
 	mlxsw_reg_mgpir_unpack(mgpir_pl, NULL, NULL, NULL,
-			       NULL, &slot_count);
+			       NULL, &slot_count, NULL);
 	if (!slot_count) {
 		*p_linecards = NULL;
 		return 0;

@@ -872,7 +872,7 @@ mlxsw_thermal_modules_init(struct device *dev, struct mlxsw_core *core,
 		return err;
 
 	mlxsw_reg_mgpir_unpack(mgpir_pl, NULL, NULL, NULL,
-			       &area->tz_module_num, NULL);
+			       &area->tz_module_num, NULL, NULL);
 
 	area->tz_module_arr = kcalloc(area->tz_module_num,
 				      sizeof(*area->tz_module_arr),
@@ -966,7 +966,7 @@ mlxsw_thermal_gearboxes_main_init(struct device *dev, struct mlxsw_core *core,
 		return err;
 
 	mlxsw_reg_mgpir_unpack(mgpir_pl, &area->tz_gearbox_num, &device_type,
-			       NULL, NULL, NULL);
+			       NULL, NULL, NULL, NULL);
 	if (device_type != MLXSW_REG_MGPIR_DEVICE_TYPE_GEARBOX_DIE)
 		area->tz_gearbox_num = 0;
 

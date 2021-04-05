@@ -29,6 +29,7 @@ struct mlxsw_m {
 	u8 base_mac[ETH_ALEN];
 	struct mlxsw_m_area *main;
 	struct mlxsw_m_area **linecards;
+	u8 max_ports;
 };
 
 struct mlxsw_m_area {
@@ -239,7 +240,7 @@ static int mlxsw_m_ports_create(struct mlxsw_m_area *mlxsw_m_area, u8 slot_index
 		return err;
 
 	mlxsw_reg_mgpir_unpack(mgpir_pl, NULL, NULL, NULL,
-			       &mlxsw_m_area->max_ports, NULL);
+			       &mlxsw_m_area->max_ports, NULL, NULL);
 
 	if (!mlxsw_m_area->max_ports)
 		return 0;

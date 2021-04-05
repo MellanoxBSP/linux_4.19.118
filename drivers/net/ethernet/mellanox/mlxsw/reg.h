@@ -8991,6 +8991,12 @@ MLXSW_ITEM32(reg, mgpir, devices_per_flash, 0x00, 16, 8);
  */
 MLXSW_ITEM32(reg, mgpir, num_of_devices, 0x00, 0, 8);
 
+/* max_modules_per_slot
+ * Maximum number of modules that can be connected per slot.
+ * Access: RO
+ */
+MLXSW_ITEM32(reg, mgpir, max_modules_per_slot, 0x04, 16, 8);
+
 /* num_of_slots
  * Number of slots in the system.
  * Access: RO
@@ -9013,7 +9019,7 @@ static inline void
 mlxsw_reg_mgpir_unpack(char *payload, u8 *num_of_devices,
 		       enum mlxsw_reg_mgpir_device_type *device_type,
 		       u8 *devices_per_flash, u8 *num_of_modules,
-		       u8 *num_of_slots)
+		       u8 *num_of_slots, u8 *max_modules_per_slot)
 {
 	if (num_of_devices)
 		*num_of_devices = mlxsw_reg_mgpir_num_of_devices_get(payload);
@@ -9026,6 +9032,9 @@ mlxsw_reg_mgpir_unpack(char *payload, u8 *num_of_devices,
 		*num_of_modules = mlxsw_reg_mgpir_num_of_modules_get(payload);
 	if (num_of_slots)
 		*num_of_slots = mlxsw_reg_mgpir_num_of_slots_get(payload);
+	if (max_modules_per_slot)
+		*max_modules_per_slot =
+				mlxsw_reg_mgpir_max_modules_per_slot_get(payload);
 }
 
 /* MTECR - Management Temperature Extended Capabilities Register
