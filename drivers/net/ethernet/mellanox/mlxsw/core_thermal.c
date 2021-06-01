@@ -800,11 +800,12 @@ mlxsw_thermal_module_tz_init(struct mlxsw_thermal_module *module_tz)
 	snprintf(tz_name, sizeof(tz_name), "mlxsw-module%d",
 		 module_tz->module + 1);
 	module_tz->tzdev = thermal_zone_device_register(tz_name,
-						MLXSW_THERMAL_NUM_TRIPS,
-						MLXSW_THERMAL_TRIP_MASK,
-						module_tz,
-						&mlxsw_thermal_module_ops,
-						&mlxsw_thermal_params, 0, 0);
+							MLXSW_THERMAL_NUM_TRIPS,
+							MLXSW_THERMAL_TRIP_MASK,
+							module_tz,
+							&mlxsw_thermal_module_ops,
+							&mlxsw_thermal_params, 0,
+							module_tz->parent->polling_delay);
 	if (IS_ERR(module_tz->tzdev)) {
 		err = PTR_ERR(module_tz->tzdev);
 		return err;
@@ -924,7 +925,8 @@ mlxsw_thermal_gearbox_tz_init(struct mlxsw_thermal_module *gearbox_tz)
 						MLXSW_THERMAL_TRIP_MASK,
 						gearbox_tz,
 						&mlxsw_thermal_gearbox_ops,
-						&mlxsw_thermal_params, 0, 0);
+						&mlxsw_thermal_params, 0,
+						gearbox_tz->parent->polling_delay);
 	if (IS_ERR(gearbox_tz->tzdev))
 		return PTR_ERR(gearbox_tz->tzdev);
 
