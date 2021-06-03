@@ -165,24 +165,29 @@ mlxsw_thermal_module_trips_reset(struct mlxsw_thermal_module *tz)
 
 static int
 mlxsw_thermal_module_trips_update(struct device *dev, struct mlxsw_core *core,
-				  struct mlxsw_thermal_module *tz)
+				  struct mlxsw_thermal_module *tz,
+				  int crit_temp, int emerg_temp)
 {
-	int crit_temp, emerg_temp;
 	int err;
 
-	err = mlxsw_env_module_temp_thresholds_get(core, tz->slot_index,
-						   tz->module,
-						   SFP_TEMP_HIGH_WARN,
-						   &crit_temp);
-	if (err)
-		return err;
+	/* Do not try to query temperature thresholds directly from the module's
+	 * EEPROM if we got valid thresholds from MTMP.
+	 */
+	if (!emerg_temp || !crit_temp) {
+		err = mlxsw_env_module_temp_thresholds_get(core, tz->slot_index,
+							   tz->module,
+							   SFP_TEMP_HIGH_WARN,
+							   &crit_temp);
+		if (err)
+			return err;
 
-	err = mlxsw_env_module_temp_thresholds_get(core, tz->slot_index,
-						   tz->module,
-						   SFP_TEMP_HIGH_ALARM,
-						   &emerg_temp);
-	if (err)
-		return err;
+		err = mlxsw_env_module_temp_thresholds_get(core, tz->slot_index,
+							   tz->module,
+							   SFP_TEMP_HIGH_ALARM,
+							   &emerg_temp);
+		if (err)
+			return err;
+	}
 
 	if (crit_temp > emerg_temp) {
 		dev_warn(dev, "%s : Critical threshold %d is above emergency threshold %d\n",
@@ -543,9 +548,9 @@ static int mlxsw_thermal_module_temp_get(struct thermal_zone_device *tzdev,
 {
 	struct mlxsw_thermal_module *tz = tzdev->devdata;
 	struct mlxsw_thermal *thermal = tz->parent;
+	int temp, crit_temp, emerg_temp;
 	struct device *dev;
 	u16 sensor_index;
-	int temp;
 	int err;
 
 	/* Do not read temperature in initialization stage. */
@@ -561,14 +566,15 @@ static int mlxsw_thermal_module_temp_get(struct thermal_zone_device *tzdev,
 	mlxsw_thermal_module_temp_and_thresholds_get(thermal->core,
 						     tz->slot_index,
 						     sensor_index, &temp,
-						     NULL,  NULL);
+						     &crit_temp, &emerg_temp);
 	*p_temp = temp;
 
 	if (!temp)
 		return 0;
 
 	/* Update trip points. */
-	err = mlxsw_thermal_module_trips_update(dev, thermal->core, tz);
+	err = mlxsw_thermal_module_trips_update(dev, thermal->core, tz,
+						crit_temp, emerg_temp);
 	if (!err && temp > 0)
 		mlxsw_thermal_tz_score_update(thermal, tzdev, tz->trips, temp);
 
