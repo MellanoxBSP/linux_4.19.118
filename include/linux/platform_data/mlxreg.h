@@ -70,6 +70,19 @@ enum mlxreg_hotplug_device_action {
 };
 
 /**
+ * struct mlxreg_core_hotplug_notifier - hotplug notifier block:
+ *
+ * @identity: notifier identity name;
+ * @handle: user handle to be passed by user handler function;
+ * @user_handler: user handler function associated with the event;
+ */
+struct mlxreg_core_hotplug_notifier {
+	char identity[MLXREG_CORE_LABEL_MAX_SIZE];
+	void *handle;
+	int (*user_handler)(void *handle, enum mlxreg_hotplug_kind kind, u8 action);
+};
+
+/**
  * struct mlxreg_hotplug_device - I2C device data:
  *
  * @adapter: I2C device adapter;
@@ -80,6 +93,7 @@ enum mlxreg_hotplug_device_action {
  * @action: action to be performed upon event receiving;
  * @handle: user handle to be passed by user handler function;
  * @user_handler: user handler function associated with the event;
+ * @notifier: pointer to event notifier block;
  *
  * Structure represents I2C hotplug device static data (board topology) and
  * dynamic data (related kernel objects handles).
@@ -93,6 +107,7 @@ struct mlxreg_hotplug_device {
 	enum mlxreg_hotplug_device_action action;
 	void *handle;
 	int (*user_handler)(void *handle, enum mlxreg_hotplug_kind kind, u8 action);
+	struct mlxreg_core_hotplug_notifier *notifier;
 };
 
 /**
@@ -104,11 +119,13 @@ struct mlxreg_hotplug_device {
  * @bit: attribute effective bit;
  * @capability: attribute capability register;
  * @reg_prsnt: attribute presence register;
+ * @reg_sync: attribute synch register;
  * @reg_pwr: attribute power register;
  * @reg_ena: attribute enable register;
  * @mode: access mode;
  * @np - pointer to node platform associated with attribute;
  * @hpdev - hotplug device data;
+ * @notifier: pointer to event notifier block;
  * @health_cntr: dynamic device health indication counter;
  * @attached: true if device has been attached after good health indication;
  * @regnum: number of registers occupied by multi-register attribute;
@@ -121,11 +138,13 @@ struct mlxreg_core_data {
 	u32 bit;
 	u32 capability;
 	u32 reg_prsnt;
+	u32 reg_sync;
 	u32 reg_pwr;
 	u32 reg_ena;
 	umode_t	mode;
 	struct device_node *np;
 	struct mlxreg_hotplug_device hpdev;
+	struct mlxreg_core_hotplug_notifier *notifier;
 	u32 health_cntr;
 	bool attached;
 	u8 regnum;

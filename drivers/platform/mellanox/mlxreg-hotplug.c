@@ -121,7 +121,7 @@ static int mlxreg_hotplug_device_create(struct mlxreg_hotplug_priv_data *priv,
 	 */
 	if (data->hpdev.nr < 0)
 		return 0;
-
+dev_info(priv->dev, "label %s action %d kind %d\n", data->label, data->hpdev.action, kind);
 	pdata = dev_get_platdata(&priv->pdev->dev);
 	switch (data->hpdev.action) {
 	case MLXREG_HOTPLUG_DEVICE_DEFAULT_ACTION:
@@ -156,6 +156,8 @@ static int mlxreg_hotplug_device_create(struct mlxreg_hotplug_priv_data *priv,
 		if (data->hpdev.brdinfo && data->hpdev.brdinfo->platform_data)
 			mlxreg_hotplug_pdata_export(data->hpdev.brdinfo->platform_data,
 						    pdata->regmap);
+		/* Pass parent hotplug device handle to underlying device. */
+		data->notifier = data->hpdev.notifier;
 		data->hpdev.pdev = platform_device_register_resndata(&priv->pdev->dev,
 								     brdinfo->type,
 								     data->hpdev.nr,
@@ -169,8 +171,8 @@ static int mlxreg_hotplug_device_create(struct mlxreg_hotplug_priv_data *priv,
 		break;
 	}
 
-	if (data->hpdev.user_handler)
-		return data->hpdev.user_handler(data->hpdev.handle, kind, 1);
+	if (data->hpdev.notifier && data->hpdev.notifier->user_handler)
+		return data->hpdev.notifier->user_handler(data->hpdev.notifier->handle, kind, 1);
 
 	return 0;
 }
@@ -182,6 +184,8 @@ mlxreg_hotplug_device_destroy(struct mlxreg_hotplug_priv_data *priv,
 {
 	/* Notify user by sending hwmon uevent. */
 	mlxreg_hotplug_udev_event_send(&priv->hwmon->kobj, data, false);
+	if (data->hpdev.notifier && data->hpdev.notifier->user_handler)
+		data->hpdev.notifier->user_handler(data->hpdev.notifier->handle, kind, 0);
 
 	switch (data->hpdev.action) {
 	case MLXREG_HOTPLUG_DEVICE_DEFAULT_ACTION:
@@ -202,9 +206,6 @@ mlxreg_hotplug_device_destroy(struct mlxreg_hotplug_priv_data *priv,
 	default:
 		break;
 	}
-
-	if (data->hpdev.user_handler)
-		data->hpdev.user_handler(data->hpdev.handle, kind, 0);
 }
 
 static ssize_t mlxreg_hotplug_attr_show(struct device *dev,
