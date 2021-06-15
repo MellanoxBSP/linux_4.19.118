@@ -101,10 +101,8 @@ mlxreg_io_get_reg(void *regmap, struct mlxreg_core_data *data, u32 in_val,
 			ret = regmap_read(regmap, data->reg + i, &val);
 			if (ret)
 				goto access_error;
-
-			*regval |= rol32(val, regsize * i);
+			*regval |= rol32(val, regsize * i * 8);
 		}
-		*regval = le32_to_cpu(*regval & regmax);
 	}
 
 access_error:
