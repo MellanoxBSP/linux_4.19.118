@@ -54,7 +54,8 @@
 #define MP2975_PAGE_NUM		2
 
 #define MP2975_RAIL2_FUNC	(PMBUS_HAVE_VOUT | PMBUS_HAVE_STATUS_VOUT | \
-				 PMBUS_HAVE_IOUT | PMBUS_HAVE_STATUS_IOUT)
+				 PMBUS_HAVE_IOUT | PMBUS_HAVE_STATUS_IOUT | \
+				 PMBUS_HAVE_POUT)
 
 struct mp2975_data {
 	struct pmbus_driver_info info;
