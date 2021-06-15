@@ -9029,8 +9029,8 @@ MLXSW_ITEM32(reg, mgpir, num_of_modules, 0x04, 0, 8);
 
 static inline void mlxsw_reg_mgpir_pack(char *payload, u8 slot_index)
 {
-	mlxsw_reg_mgpir_slot_index_set(payload, slot_index);
 	MLXSW_REG_ZERO(mgpir, payload);
+	mlxsw_reg_mgpir_slot_index_set(payload, slot_index);
 }
 
 static inline void
@@ -9110,35 +9110,22 @@ static inline void mlxsw_reg_mtecr_pack(char *payload, u8 slot_index)
 
 static inline void mlxsw_reg_mtecr_unpack(char *payload, u16 *sensor_count,
 					  u16 *last_sensor,
-					  u8 *internal_sensor_count,
-					  u8 *sensor_map)
+					  u8 *internal_sensor_count)
 {
-	int bit;
-
-	*sensor_count = mlxsw_reg_mtecr_sensor_count_get(payload);
+	if (sensor_count)
+		*sensor_count = mlxsw_reg_mtecr_sensor_count_get(payload);
 	if (last_sensor)
 		*last_sensor = mlxsw_reg_mtecr_last_sensor_get(payload);
 	if (internal_sensor_count)
 		*internal_sensor_count =
 			mlxsw_reg_mtecr_internal_sensor_count_get(payload);
-	/* Fill out sensor mapping array. */
-	if (sensor_map) {
-		for (bit = 0; bit < *last_sensor; bit++) {
-			if (mlxsw_reg_mtecr_sensor_map_get(payload, bit))
-				*sensor_map++ = bit;
-		}
-	}
 }
 
 /* MDDQ - Management DownStream Device Query Register
  * --------------------------------------------------
  * This register allows to query the DownStream device properties. The desired
  * information is chosen upon the query_type field and is delivered by 32B
- * of data blocks. Each block is tagged with a message sequential number,
- * thus a retry request might be asked in case the block was corrupted.
- * For specific information (for example, port_info - TBD), a previous
- * information might be necessary to read before to be filled in the
- * query_index field (for example, device_index).
+ * of data blocks.
  */
 #define MLXSW_REG_MDDQ_ID 0x9161
 #define MLXSW_REG_MDDQ_LEN 0x30
@@ -9155,7 +9142,11 @@ MLXSW_ITEM32(reg, mddq, sie, 0x00, 31, 1);
 
 enum mlxsw_reg_mddq_query_type {
 	MLXSW_REG_MDDQ_QUERY_TYPE_SLOT_INFO = 1,
-	MLXSW_REG_MDDQ_QUERY_TYPE_DEVICE_INFO,
+	MLXSW_REG_MDDQ_QUERY_TYPE_DEVICE_INFO, /* If there are no devices
+						* on the slot, data_valid
+						* will be '0'.
+						*/
+	MLXSW_REG_MDDQ_QUERY_TYPE_SLOT_NAME,
 };
 
 /* reg_mddq_query_type
@@ -9169,6 +9160,28 @@ MLXSW_ITEM32(reg, mddq, query_type, 0x00, 16, 8);
  */
 MLXSW_ITEM32(reg, mddq, slot_index, 0x00, 0, 4);
 
+/* reg_mddq_response_msg_seq
+ * Response message sequential number. For a specific request, the response
+ * message sequential number is the following one. In addition, the last
+ * message should be 0.
+ * Access: RO
+ */
+MLXSW_ITEM32(reg, mddq, response_msg_seq, 0x04, 16, 8);
+
+/* reg_mddq_request_msg_seq
+ * Request message sequential number.
+ * The first message number should be 0.
+ * Access: Index
+ */
+MLXSW_ITEM32(reg, mddq, request_msg_seq, 0x04, 0, 8);
+
+/* reg_mddq_data_valid
+ * If set, the data in the data field is valid and contain the information
+ * for the queried index.
+ * Access: RO
+ */
+MLXSW_ITEM32(reg, mddq, data_valid, 0x08, 31, 1);
+
 /* reg_mddq_provisioned
  * If set, the INI file is applied and the card is provisioned.
  * Access: RO
@@ -9181,18 +9194,24 @@ MLXSW_ITEM32(reg, mddq, provisioned, 0x10, 31, 1);
  */
 MLXSW_ITEM32(reg, mddq, sr_valid, 0x10, 30, 1);
 
+enum mlxsw_reg_mddq_ready {
+	MLXSW_REG_MDDQ_READY_NOT_READY,
+	MLXSW_REG_MDDQ_READY_READY,
+	MLXSW_REG_MDDQ_READY_ERROR,
+};
+
 /* reg_mddq_lc_ready
  * If set, the LC is powered on, matching the INI version and a new FW
  * version can be burnt (if necessary).
  * Access: RO
  */
-MLXSW_ITEM32(reg, mddq, lc_ready, 0x10, 29, 1);
+MLXSW_ITEM32(reg, mddq, lc_ready, 0x10, 28, 2);
 
 /* reg_mddq_active
  * If set, the FW has completed the MDDC.device_enable command.
  * Access: RO
  */
-MLXSW_ITEM32(reg, mddq, active, 0x10, 28, 1);
+MLXSW_ITEM32(reg, mddq, active, 0x10, 27, 1);
 
 /* reg_mddq_hw_revision
  * Major user-configured version number of the current INI file.
@@ -9201,12 +9220,12 @@ MLXSW_ITEM32(reg, mddq, active, 0x10, 28, 1);
  */
 MLXSW_ITEM32(reg, mddq, hw_revision, 0x14, 16, 16);
 
-/* reg_mddq_minor_ini_file_version
- * Major user-configured version number of the current INI file.
- * Valid only when active or ready are '1'.
+/* reg_mddq_ini_file_version
+ * User-configured version number of the current INI file.
+ * Valid only when active or lc_ready are '1'.
  * Access: RO
  */
-MLXSW_ITEM32(reg, mddq, minor_ini_file_version, 0x14, 0, 16);
+MLXSW_ITEM32(reg, mddq, ini_file_version, 0x14, 0, 16);
 
 enum mlxsw_reg_mddq_card_type {
 	MLXSW_REG_MDDQ_CARD_TYPE_BUFFALO_4X400G,
@@ -9220,21 +9239,28 @@ enum mlxsw_reg_mddq_card_type {
 MLXSW_ITEM32(reg, mddq, card_type, 0x18, 0, 8);
 
 static inline void
-mlxsw_reg_mddq_pack(char *payload, u8 slot_index, bool sie,
-		    enum mlxsw_reg_mddq_query_type query_type)
+__mlxsw_reg_mddq_pack(char *payload, u8 slot_index,
+		      enum mlxsw_reg_mddq_query_type query_type)
 {
 	MLXSW_REG_ZERO(mddq, payload);
 	mlxsw_reg_mddq_slot_index_set(payload, slot_index);
-	mlxsw_reg_mddq_sie_set(payload, sie);
 	mlxsw_reg_mddq_query_type_set(payload, query_type);
+}
+
+static inline void
+mlxsw_reg_mddq_slot_info_pack(char *payload, u8 slot_index, bool sie)
+{
+	__mlxsw_reg_mddq_pack(payload, slot_index,
+			      MLXSW_REG_MDDQ_QUERY_TYPE_SLOT_INFO);
+	mlxsw_reg_mddq_sie_set(payload, sie);
 }
 
 static inline void
 mlxsw_reg_mddq_slot_info_unpack(const char *payload, u8 *p_slot_index,
 				bool *p_provisioned, bool *p_sr_valid,
-				bool *p_lc_ready, bool *p_active,
-				u16 *p_hw_revision,
-				u16 *p_minor_ini_file_version,
+				enum mlxsw_reg_mddq_ready *p_lc_ready,
+				bool *p_active, u16 *p_hw_revision,
+				u16 *p_ini_file_version,
 				enum mlxsw_reg_mddq_card_type *p_card_type)
 {
 	*p_slot_index = mlxsw_reg_mddq_slot_index_get(payload);
@@ -9243,9 +9269,84 @@ mlxsw_reg_mddq_slot_info_unpack(const char *payload, u8 *p_slot_index,
 	*p_lc_ready = mlxsw_reg_mddq_lc_ready_get(payload);
 	*p_active = mlxsw_reg_mddq_active_get(payload);
 	*p_hw_revision = mlxsw_reg_mddq_hw_revision_get(payload);
-	*p_minor_ini_file_version =
-		mlxsw_reg_mddq_minor_ini_file_version_get(payload);
+	*p_ini_file_version = mlxsw_reg_mddq_ini_file_version_get(payload);
 	*p_card_type = mlxsw_reg_mddq_card_type_get(payload);
+}
+
+/* reg_mddq_flash_owner
+ * If set, the device is the flash owner. Otherwise, a shared flash
+ * is used by this device (another device is the flash owner).
+ * Access: RO
+ */
+MLXSW_ITEM32(reg, mddq, flash_owner, 0x10, 30, 1);
+
+/* reg_mddq_device_index
+ * Device index. The first device should number 0.
+ * Access: RO
+ */
+MLXSW_ITEM32(reg, mddq, device_index, 0x10, 0, 8);
+
+/* reg_mddq_fw_major
+ * Major FW version number.
+ * Access: RO
+ */
+MLXSW_ITEM32(reg, mddq, fw_major, 0x14, 16, 16);
+
+/* reg_mddq_fw_minor
+ * Minor FW version number.
+ * Access: RO
+ */
+MLXSW_ITEM32(reg, mddq, fw_minor, 0x18, 16, 16);
+
+/* reg_mddq_fw_sub_minor
+ * Sub-minor FW version number.
+ * Access: RO
+ */
+MLXSW_ITEM32(reg, mddq, fw_sub_minor, 0x18, 0, 16);
+
+static inline void
+mlxsw_reg_mddq_device_info_pack(char *payload, u8 slot_index,
+				u8 request_msg_seq)
+{
+	__mlxsw_reg_mddq_pack(payload, slot_index,
+			      MLXSW_REG_MDDQ_QUERY_TYPE_DEVICE_INFO);
+	mlxsw_reg_mddq_request_msg_seq_set(payload, request_msg_seq);
+}
+
+static inline void
+mlxsw_reg_mddq_device_info_unpack(const char *payload, u8 *p_response_msg_seq,
+				  bool *p_data_valid, bool *p_flash_owner,
+				  u8 *p_device_index, u16 *p_fw_major,
+				  u16 *p_fw_minor, u16 *p_fw_sub_minor)
+{
+	*p_response_msg_seq = mlxsw_reg_mddq_response_msg_seq_get(payload);
+	*p_data_valid = mlxsw_reg_mddq_data_valid_get(payload);
+	*p_flash_owner = mlxsw_reg_mddq_flash_owner_get(payload);
+	*p_device_index = mlxsw_reg_mddq_device_index_get(payload);
+	*p_fw_major = mlxsw_reg_mddq_fw_major_get(payload);
+	*p_fw_minor = mlxsw_reg_mddq_fw_minor_get(payload);
+	*p_fw_sub_minor = mlxsw_reg_mddq_fw_sub_minor_get(payload);
+}
+
+#define MLXSW_REG_MDDQ_SLOT_ACII_NAME_LEN 20
+
+/* reg_mddq_slot_ascii_name
+ * Slot's ASCII name.
+ * Access: RO
+ */
+MLXSW_ITEM_BUF(reg, mddq, slot_ascii_name, 0x10,
+	       MLXSW_REG_MDDQ_SLOT_ACII_NAME_LEN);
+
+static inline void
+mlxsw_reg_mddq_slot_name_pack(char *payload, u8 slot_index)
+{
+	__mlxsw_reg_mddq_pack(payload, slot_index,
+			      MLXSW_REG_MDDQ_QUERY_TYPE_SLOT_NAME);
+}
+static inline void
+mlxsw_reg_mddq_slot_name_unpack(const char *payload, char *slot_ascii_name)
+{
+	mlxsw_reg_mddq_slot_ascii_name_memcpy_from(payload, slot_ascii_name);
 }
 
 /* MDDC - Management DownStream Device Control Register
@@ -9263,15 +9364,11 @@ MLXSW_REG_DEFINE(mddc, MLXSW_REG_MDDC_ID, MLXSW_REG_MDDC_LEN);
  */
 MLXSW_ITEM32(reg, mddc, slot_index, 0x00, 0, 4);
 
-enum mlxsw_reg_mddc_rst {
-	MLXSW_REG_MDDC_RST_SOFT_RESET = 1,
-};
-
 /* reg_mddc_rst
  * Reset request.
  * Access: RW
  */
-MLXSW_ITEM32(reg, mddc, rst, 0x04, 29, 3);
+MLXSW_ITEM32(reg, mddc, rst, 0x04, 29, 1);
 
 /* reg_mddc_device_enable
  * When set, FW is the manager and allowed to program the Downstream Device.
@@ -9279,12 +9376,12 @@ MLXSW_ITEM32(reg, mddc, rst, 0x04, 29, 3);
  */
 MLXSW_ITEM32(reg, mddc, device_enable, 0x04, 28, 1);
 
-static inline void
-mlxsw_reg_mddc_pack(char *payload, u8 slot_index, bool device_enable)
+static inline void mlxsw_reg_mddc_pack(char *payload, u8 slot_index, bool rst,
+				       bool device_enable)
 {
 	MLXSW_REG_ZERO(mddc, payload);
 	mlxsw_reg_mddc_slot_index_set(payload, slot_index);
-	mlxsw_reg_mddc_rst_set(payload, MLXSW_REG_MDDC_RST_SOFT_RESET);
+	mlxsw_reg_mddc_rst_set(payload, rst);
 	mlxsw_reg_mddc_device_enable_set(payload, device_enable);
 }
 

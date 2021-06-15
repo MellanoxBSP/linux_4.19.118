@@ -24,7 +24,7 @@
 #define MLXSW_THERMAL_MODULE_TEMP_HOT	80000	/* 80C */
 #define MLXSW_THERMAL_HYSTERESIS_TEMP	5000	/* 5C */
 #define MLXSW_THERMAL_MODULE_TEMP_SHIFT	(MLXSW_THERMAL_HYSTERESIS_TEMP * 2)
-#define MLXSW_THERMAL_ZONE_MAX_NAME	16
+#define MLXSW_THERMAL_ZONE_MAX_NAME	THERMAL_NAME_LENGTH
 #define MLXSW_THERMAL_TEMP_SCORE_MAX	GENMASK(31, 0)
 #define MLXSW_THERMAL_MAX_STATE	10
 #define MLXSW_THERMAL_MAX_DUTY	255
@@ -100,6 +100,7 @@ struct mlxsw_thermal_module {
 };
 
 struct mlxsw_thermal_area {
+	struct mlxsw_thermal *parent;
 	struct mlxsw_thermal_module *tz_module_arr;
 	u8 tz_module_num;
 	struct mlxsw_thermal_module *tz_gearbox_arr;
@@ -196,11 +197,10 @@ mlxsw_thermal_module_trips_update(struct device *dev, struct mlxsw_core *core,
 	}
 
 	/* According to the system thermal requirements, the thermal zones are
-	 * defined with four trip points. The critical and emergency
+	 * defined with three trip points. The critical and emergency
 	 * temperature thresholds, provided by QSFP module are set as "active"
-	 * and "hot" trip points, "normal" and "critical" trip points are
-	 * derived from "active" and "hot" by subtracting or adding double
-	 * hysteresis value.
+	 * and "hot" trip points, "normal" trip point is derived from "active"
+	 * by subtracting double hysteresis value.
 	 */
 	if (crit_temp >= MLXSW_THERMAL_MODULE_TEMP_SHIFT)
 		tz->trips[MLXSW_THERMAL_TEMP_TRIP_NORM].temp = crit_temp -
@@ -221,7 +221,7 @@ static void mlxsw_thermal_tz_score_update(struct mlxsw_thermal *thermal,
 	struct mlxsw_thermal_trip *trip = trips;
 	unsigned int score, delta, i, shift = 1;
 
-	/* Calculate thermal zone score, if temperature is above the critical
+	/* Calculate thermal zone score, if temperature is above the hot
 	 * threshold score is set to MLXSW_THERMAL_TEMP_SCORE_MAX.
 	 */
 	score = MLXSW_THERMAL_TEMP_SCORE_MAX;
@@ -892,13 +892,16 @@ mlxsw_thermal_modules_init(struct device *dev, struct mlxsw_core *core,
 	if (!mlxsw_core_res_query_enabled(core))
 		return 0;
 
-	mlxsw_reg_mgpir_pack(mgpir_pl, 0);
+	mlxsw_reg_mgpir_pack(mgpir_pl, area->slot_index);
 	err = mlxsw_reg_query(core, MLXSW_REG(mgpir), mgpir_pl);
 	if (err)
 		return err;
 
 	mlxsw_reg_mgpir_unpack(mgpir_pl, NULL, NULL, NULL,
 			       &area->tz_module_num, NULL, NULL);
+	/* For modular system module counter could be zero. */
+	if (!area->tz_module_num)
+		return 0;
 
 	area->tz_module_arr = kcalloc(area->tz_module_num,
 				      sizeof(*area->tz_module_arr),
@@ -1076,49 +1079,67 @@ static void
 mlxsw_thermal_got_active(struct mlxsw_core *mlxsw_core, u8 slot_index,
 			 const struct mlxsw_linecard *linecard, void *priv)
 {
-	struct mlxsw_thermal *thermal = priv;
-	struct mlxsw_thermal_area *area = thermal->linecards[slot_index];
 	struct mlxsw_env_gearbox_sensors_map map;
+	struct mlxsw_thermal *thermal = priv;
+	struct mlxsw_thermal_area *lc;
 	int err;
 
+	lc = kzalloc(sizeof(*lc), GFP_KERNEL);
+	if (!lc)
+		return;
+
+	lc->slot_index = slot_index;
+	lc->parent = thermal;
+	thermal->linecards[slot_index - 1] = lc;
 	err = mlxsw_thermal_modules_init(thermal->bus_info->dev, thermal->core,
-					 thermal, area);
+					 thermal, lc);
 	if (err)
 		goto err_thermal_linecard_modules_init;
 
-	map.sensor_bit_map = area->gearbox_sensor_map;
 	err = mlxsw_env_sensor_map_create(thermal->core, thermal->bus_info,
 					  linecard->slot_index, &map);
 	if (err)
 		goto err_thermal_linecard_env_sensor_map_create;
 
+	lc->gearbox_sensor_map = map.sensor_bit_map;
+	lc->tz_gearbox_num = map.sensor_count;
+	lc->tz_gearbox_arr = kcalloc(lc->tz_gearbox_num, sizeof(*lc->tz_gearbox_arr),
+				     GFP_KERNEL);
+	if (!lc->tz_gearbox_arr) {
+		err = -ENOMEM;
+		goto err_tz_gearbox_arr_alloc;
+	}
+
 	err = mlxsw_thermal_gearboxes_init(thermal->bus_info->dev, thermal->core,
-					   thermal, area);
+					   thermal, lc);
 	if (err)
 		goto err_thermal_linecard_gearboxes_init;
 
 	return;
 
 err_thermal_linecard_gearboxes_init:
+	kfree(lc->tz_gearbox_arr);
+err_tz_gearbox_arr_alloc:
 	mlxsw_env_sensor_map_destroy(thermal->bus_info,
-				     area->gearbox_sensor_map);
+				     lc->gearbox_sensor_map);
 err_thermal_linecard_env_sensor_map_create:
-	mlxsw_thermal_modules_fini(thermal, area);
+	mlxsw_thermal_modules_fini(thermal, lc);
 err_thermal_linecard_modules_init:
-	devm_kfree(thermal->bus_info->dev, area);
+	kfree(lc);
 }
 
 static void mlxsw_thermal_got_inactive(struct mlxsw_core *mlxsw_core, u8 slot_index,
 				       const struct mlxsw_linecard *linecard, void *priv)
 {
 	struct mlxsw_thermal *thermal = priv;
-	struct mlxsw_thermal_area *area = thermal->linecards[slot_index];
+	struct mlxsw_thermal_area *lc = thermal->linecards[slot_index];
 
-	mlxsw_thermal_gearboxes_fini(thermal, area);
+	mlxsw_thermal_gearboxes_fini(thermal, lc);
+	kfree(lc->tz_gearbox_arr);
 	mlxsw_env_sensor_map_destroy(thermal->bus_info,
-				     area->gearbox_sensor_map);
-	mlxsw_thermal_modules_fini(thermal, area);
-	devm_kfree(thermal->bus_info->dev, area);
+				     lc->gearbox_sensor_map);
+	mlxsw_thermal_modules_fini(thermal, lc);
+	kfree(lc);
 }
 
 static struct mlxsw_linecards_event_ops mlxsw_thermal_event_ops = {
@@ -1278,6 +1299,7 @@ int mlxsw_thermal_init(struct mlxsw_core *core,
 	return 0;
 
 err_linecards_register:
+	mlxsw_thermal_gearboxes_fini(thermal, thermal->main);
 err_thermal_gearboxes_init:
 	mlxsw_thermal_gearboxes_main_fini(thermal->main);
 err_thermal_gearboxes_main_init:

@@ -323,34 +323,36 @@ int mlxsw_env_sensor_map_create(struct mlxsw_core *core,
 				u8 slot_index,
 				struct mlxsw_env_gearbox_sensors_map *map)
 {
-	u8 sensor_map[MLXSW_REG_MTECR_SENSOR_MAP_LEN];
 	char mtecr_pl[MLXSW_REG_MTECR_LEN];
-	int err;
+	u16 last_sensor;
+	int i, bit, err;
 
 	mlxsw_reg_mtecr_pack(mtecr_pl, slot_index);
 	err = mlxsw_reg_query(core, MLXSW_REG(mtecr), mtecr_pl);
 	if (err)
 		return err;
 
-	mlxsw_reg_mtecr_unpack(mtecr_pl, &map->sensor_count, NULL, NULL,
-			       sensor_map);
+	mlxsw_reg_mtecr_unpack(mtecr_pl, &map->sensor_count, &last_sensor, NULL);
 	if (!map->sensor_count)
 		return 0;
 
 	/* Fill out sensor mapping array. */
-	map->sensor_bit_map = devm_kmemdup(bus_info->dev, sensor_map,
-					   map->sensor_count * sizeof(u16),
-					   GFP_KERNEL);
+	map->sensor_bit_map = kcalloc(map->sensor_count, sizeof(u16), GFP_KERNEL);
 	if (!map->sensor_bit_map)
 		return -ENOMEM;
 
-	return 0;
+	for (bit = 0, i = 0; bit <= last_sensor && i < map->sensor_count; bit++) {
+		if (mlxsw_reg_mtecr_sensor_map_get(mtecr_pl, bit))
+			map->sensor_bit_map[i++] = bit;
+	}
+
+ 	return 0;
 }
 EXPORT_SYMBOL(mlxsw_env_sensor_map_create);
 
 void mlxsw_env_sensor_map_destroy(const struct mlxsw_bus_info *bus_info,
 				  u16 *sensor_bit_map)
 {
-	devm_kfree(bus_info->dev, sensor_bit_map);
+	kfree(sensor_bit_map);
 }
 EXPORT_SYMBOL(mlxsw_env_sensor_map_destroy);

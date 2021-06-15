@@ -45,6 +45,7 @@ struct mlxsw_core_port {
 	struct devlink_port devlink_port;
 	void *port_driver_priv;
 	u8 local_port;
+	struct mlxsw_linecard *linecard;
 };
 
 void *mlxsw_core_port_driver_priv(struct mlxsw_core_port *mlxsw_core_port)
@@ -1055,7 +1056,8 @@ int mlxsw_core_bus_device_register(const struct mlxsw_bus_info *mlxsw_bus_info,
 			goto err_devlink_register;
 	}
 
-	err = mlxsw_linecards_init(mlxsw_core, &mlxsw_core->linecards);
+	err = mlxsw_linecards_init(mlxsw_core, mlxsw_bus_info,
+				   &mlxsw_core->linecards);
 	if (err)
 		goto err_linecards_init;
 
@@ -1071,10 +1073,6 @@ int mlxsw_core_bus_device_register(const struct mlxsw_bus_info *mlxsw_bus_info,
 			goto err_register_params;
 	}
 
-	err = mlxsw_linecards_post_init(mlxsw_core, mlxsw_core->linecards);
-	if (err)
-		goto err_linecards_post_init;
-
 	err = mlxsw_hwmon_init(mlxsw_core, mlxsw_bus_info, &mlxsw_core->hwmon);
 	if (err)
 		goto err_hwmon_init;
@@ -1089,15 +1087,19 @@ int mlxsw_core_bus_device_register(const struct mlxsw_bus_info *mlxsw_bus_info,
 	if (err)
 		goto err_qsfp_init;
 
+	err = mlxsw_linecards_post_init(mlxsw_core, mlxsw_core->linecards);
+	if (err)
+		goto err_linecards_post_init;
+
 	return 0;
 
+err_linecards_post_init:
+	mlxsw_qsfp_fini(mlxsw_core->qsfp);
 err_qsfp_init:
 	mlxsw_thermal_fini(mlxsw_core->thermal);
 err_thermal_init:
 	mlxsw_hwmon_fini(mlxsw_core->hwmon);
 err_hwmon_init:
-	mlxsw_linecards_pre_fini(mlxsw_core, mlxsw_core->linecards);
-err_linecards_post_init:
 	if (mlxsw_driver->params_unregister && !reload)
 		mlxsw_driver->params_unregister(mlxsw_core);
 err_register_params:
@@ -1142,10 +1144,10 @@ void mlxsw_core_bus_device_unregister(struct mlxsw_core *mlxsw_core,
 			return;
 	}
 
+	mlxsw_linecards_pre_fini(mlxsw_core, mlxsw_core->linecards);
 	mlxsw_qsfp_fini(mlxsw_core->qsfp);
 	mlxsw_thermal_fini(mlxsw_core->thermal);
 	mlxsw_hwmon_fini(mlxsw_core->hwmon);
-	mlxsw_linecards_pre_fini(mlxsw_core, mlxsw_core->linecards);
 	if (mlxsw_core->driver->fini)
 		mlxsw_core->driver->fini(mlxsw_core);
 	if (mlxsw_core->driver->params_unregister && !reload)
@@ -1725,7 +1727,8 @@ u64 mlxsw_core_res_get(struct mlxsw_core *mlxsw_core,
 }
 EXPORT_SYMBOL(mlxsw_core_res_get);
 
-int mlxsw_core_port_init(struct mlxsw_core *mlxsw_core, u8 local_port)
+int mlxsw_core_port_init(struct mlxsw_core *mlxsw_core, u8 local_port,
+			 u8 slot_index)
 {
 	struct devlink *devlink = priv_to_devlink(mlxsw_core);
 	struct mlxsw_core_port *mlxsw_core_port =
@@ -1734,6 +1737,13 @@ int mlxsw_core_port_init(struct mlxsw_core *mlxsw_core, u8 local_port)
 	int err;
 
 	mlxsw_core_port->local_port = local_port;
+	if (slot_index) {
+		struct mlxsw_linecard *linecard;
+
+		linecard = mlxsw_linecard_get(mlxsw_core->linecards,
+					      slot_index);
+		mlxsw_core_port->linecard = linecard;
+	}
 	err = devlink_port_register(devlink, devlink_port, local_port);
 	if (err)
 		memset(mlxsw_core_port, 0, sizeof(*mlxsw_core_port));

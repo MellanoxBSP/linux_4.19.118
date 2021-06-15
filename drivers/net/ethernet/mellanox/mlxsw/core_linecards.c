@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
-/* Copyright (c) 2021 Mellanox Technologies. All rights reserved */
+/* Copyright (c) 2021 NVIDIA Corporation and Mellanox Technologies. All rights reserved */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -18,88 +18,150 @@ struct mlxsw_linecards_event_ops_item {
 	void *priv;
 };
 
-static int mlxsw_linecard_activate(struct mlxsw_core *mlxsw_core,
-				   struct mlxsw_linecard *linecard)
+static int
+mlxsw_linecard_provision_cbs_call(struct mlxsw_core *mlxsw_core,
+				  struct mlxsw_linecards *linecards,
+				  struct mlxsw_linecard *linecard)
 {
-	char mddc_pl[MLXSW_REG_MDDC_LEN];
+	struct mlxsw_linecards_event_ops_item *item;
+	int err;
 
-	mlxsw_reg_mddc_pack(mddc_pl, linecard->slot_index, true);
-	return mlxsw_reg_write(mlxsw_core, MLXSW_REG(mddc), mddc_pl);
+	list_for_each_entry(item, &linecards->event_ops_list, list) {
+		if (!item->event_ops->got_provisioned)
+			continue;
+		err = item->event_ops->got_provisioned(mlxsw_core,
+						       linecard->slot_index,
+						       linecard, item->priv);
+		if (err)
+			goto rollback;
+	}
+	return 0;
+
+rollback:
+	list_for_each_entry_continue_reverse(item, &linecards->event_ops_list,
+					     list) {
+		if (!item->event_ops->got_unprovisioned)
+			continue;
+		item->event_ops->got_unprovisioned(mlxsw_core,
+						   linecard->slot_index,
+						   linecard, item->priv);
+	}
+	return err;
 }
 
 static void
-mlxsw_linecard_provision_set(struct mlxsw_linecard *linecard,
-			     enum mlxsw_reg_mddq_card_type card_type)
-{
-}
-
-static void mlxsw_linecard_provision_clear(struct mlxsw_linecard *linecard)
-{
-}
-
-static void mlxsw_linecard_got_active(struct mlxsw_core *mlxsw_core,
-				      struct mlxsw_linecards *linecards,
-				      struct mlxsw_linecard *linecard)
+mlxsw_linecard_unprovision_cbs_call(struct mlxsw_core *mlxsw_core,
+				    struct mlxsw_linecards *linecards,
+				    struct mlxsw_linecard *linecard)
 {
 	struct mlxsw_linecards_event_ops_item *item;
 
-	list_for_each_entry(item, &linecards->event_ops_list, list)
-		item->event_ops->got_active(mlxsw_core, linecard->slot_index,
-					    linecard, item->priv);
+	list_for_each_entry(item, &linecards->event_ops_list, list) {
+		if (!item->event_ops->got_unprovisioned)
+			continue;
+		item->event_ops->got_unprovisioned(mlxsw_core,
+						   linecard->slot_index,
+						   linecard, item->priv);
+	}
 }
 
-static void mlxsw_linecard_got_inactive(struct mlxsw_core *mlxsw_core,
+static int
+mlxsw_linecard_provision_set(struct mlxsw_core *mlxsw_core,
+			     struct mlxsw_linecards *linecards,
+			     struct mlxsw_linecard *linecard,
+			     enum mlxsw_reg_mddq_card_type card_type)
+{
+	int err;
+
+	err = mlxsw_linecard_provision_cbs_call(mlxsw_core, linecards,
+						linecard);
+	if (err)
+		goto err_cbs_call;
+	linecard->provisioned = true;
+err_cbs_call:
+	return err;
+}
+
+static void mlxsw_linecard_provision_clear(struct mlxsw_core *mlxsw_core,
+					   struct mlxsw_linecards *linecards,
+					   struct mlxsw_linecard *linecard)
+{
+	linecard->provisioned = false;
+	mlxsw_linecard_unprovision_cbs_call(mlxsw_core, linecards,
+					    linecard);
+}
+
+static int mlxsw_linecard_ready_set(struct mlxsw_core *mlxsw_core, struct mlxsw_linecards *linecards,
+				    struct mlxsw_linecard *linecard)
+{
+	/*err = */mlxsw_linecard_provision_cbs_call(mlxsw_core, linecards,
+						linecard);
+
+	linecard->ready = true;
+	return 0;
+}
+
+static void mlxsw_linecard_ready_clear(struct mlxsw_linecard *linecard)
+{
+	linecard->ready = false;
+}
+
+static void mlxsw_linecard_active_set(struct mlxsw_core *mlxsw_core,
+				      struct mlxsw_linecards *linecards,
+				      struct mlxsw_linecard *linecard,
+				      u16 ini_version, u16 hw_revision)
+{
+	struct mlxsw_linecards_event_ops_item *item;
+
+	linecard->active = true;
+	linecard->hw_revision = hw_revision;
+	linecard->ini_version = ini_version;
+	list_for_each_entry(item, &linecards->event_ops_list, list) {
+		if (!item->event_ops->got_active)
+			continue;
+		item->event_ops->got_active(mlxsw_core, linecard->slot_index,
+					    linecard, item->priv);
+	}
+}
+
+static void mlxsw_linecard_active_clear(struct mlxsw_core *mlxsw_core,
 					struct mlxsw_linecards *linecards,
 					struct mlxsw_linecard *linecard)
 {
 	struct mlxsw_linecards_event_ops_item *item;
 
-	list_for_each_entry(item, &linecards->event_ops_list, list)
+	linecard->active = false;
+	list_for_each_entry(item, &linecards->event_ops_list, list) {
+		if (!item->event_ops->got_inactive)
+			continue;
 		item->event_ops->got_inactive(mlxsw_core, linecard->slot_index,
 					      linecard, item->priv);
-}
-
-static void mlxsw_linecard_got_ready(struct mlxsw_core *mlxsw_core,
-				     struct mlxsw_linecards *linecards,
-				     struct mlxsw_linecard *linecard)
-{
-	struct mlxsw_linecards_event_ops_item *item;
-
-	list_for_each_entry(item, &linecards->event_ops_list, list)
-		item->event_ops->got_ready(mlxsw_core, linecard->slot_index,
-					    linecard, item->priv);
-}
-
-static void mlxsw_linecard_got_unready(struct mlxsw_core *mlxsw_core,
-				       struct mlxsw_linecards *linecards,
-				       struct mlxsw_linecard *linecard)
-{
-	struct mlxsw_linecards_event_ops_item *item;
-
-	list_for_each_entry(item, &linecards->event_ops_list, list)
-		item->event_ops->got_unready(mlxsw_core, linecard->slot_index,
-					     linecard, item->priv);
+	}
 }
 
 static int __mlxsw_linecard_status_process(struct mlxsw_core *mlxsw_core,
 					   struct mlxsw_linecards *linecards,
 					   struct mlxsw_linecard *linecard,
 					   const char *mddq_pl,
-					   bool process_provision_only)
+					   bool process_provision_only, bool tmp_delayed)
 {
 	enum mlxsw_reg_mddq_card_type card_type;
-	u16 major_ini_file_version;
-	u16 minor_ini_file_version;
+	enum mlxsw_reg_mddq_ready ready;
 	bool provisioned;
+	u16 ini_version;
+	u16 hw_revision;
 	bool sr_valid;
 	u8 slot_index;
+	int err = 0;
 	bool active;
-	bool ready;
+	bool tmp_delayed_mddq = false;
 
 	mlxsw_reg_mddq_slot_info_unpack(mddq_pl, &slot_index, &provisioned,
 					&sr_valid, &ready, &active,
-					&major_ini_file_version,
-					&minor_ini_file_version, &card_type);
+					&hw_revision, &ini_version,
+					&card_type);
+	printk("%s delayed: %s, lc%u, prov %d, sr_valid %d, ready %d, active %d, hw_revision %u, ini_version %u provision_only %d\n",
+	       __func__, tmp_delayed ? "yes": "no", slot_index, provisioned, sr_valid, ready, active, hw_revision, ini_version, process_provision_only);
 
 	if (linecard) {
 		if (slot_index != linecard->slot_index)
@@ -110,68 +172,75 @@ static int __mlxsw_linecard_status_process(struct mlxsw_core *mlxsw_core,
 		linecard = mlxsw_linecard_get(linecards, slot_index);
 	}
 
-	if (linecard->provisioned != provisioned) {
-		if (provisioned)
-			mlxsw_linecard_provision_set(linecard, card_type);
-		else
-			mlxsw_linecard_provision_clear(linecard);
-		linecard->provisioned = provisioned;
-	}
-	if (process_provision_only)
-		return 0;
-	if (linecard->ready != ready) {
-		if (ready) {
-			int err;
+	mutex_lock(&linecard->lock);
 
-			err = mlxsw_linecard_activate(mlxsw_core, linecard);
-			if (err)
-				return err;
+	if (provisioned && linecard->provisioned != provisioned) {
+		err = mlxsw_linecard_provision_set(mlxsw_core, linecards,
+						   linecard, card_type);
+		if (err)
+			goto out;
+		if (!process_provision_only)
+			tmp_delayed_mddq = true;
+	}
 
-			mlxsw_linecard_got_ready(mlxsw_core,
-						 linecards, linecard);
-		} else {
-			mlxsw_linecard_got_unready(mlxsw_core,
-						   linecards, linecard);
-		}
-		linecard->ready = ready;
+	if (!process_provision_only && ready == MLXSW_REG_MDDQ_READY_READY &&
+	    !linecard->ready) {
+		err = mlxsw_linecard_ready_set(mlxsw_core, linecards, linecard);
+		if (err)
+			goto out;
+		tmp_delayed_mddq = true;
 	}
-	if (linecard->active != active) {
-		if (active)
-			mlxsw_linecard_got_active(mlxsw_core,
-						  linecards, linecard);
-		else
-			mlxsw_linecard_got_inactive(mlxsw_core,
-						    linecards, linecard);
-		linecard->active = active;
-	}
-	return 0;
+
+	if (!process_provision_only && active && linecard->active != active)
+		mlxsw_linecard_active_set(mlxsw_core, linecards, linecard,
+					  hw_revision, ini_version);
+
+	if (!process_provision_only && !active && linecard->active != active)
+		mlxsw_linecard_active_clear(mlxsw_core, linecards, linecard);
+
+	if (!process_provision_only && ready != MLXSW_REG_MDDQ_READY_READY &&
+	    linecard->ready)
+		mlxsw_linecard_ready_clear(linecard);
+
+	if (!provisioned && linecard->provisioned != provisioned)
+		mlxsw_linecard_provision_clear(mlxsw_core, linecards, linecard);
+
+out:
+	mutex_unlock(&linecard->lock);
+
+#if 0
+	if (tmp_delayed_mddq)
+		mlxsw_core_schedule_dw(&linecard->tmp_mddq_dw, msecs_to_jiffies(1500));
+#endif
+	return err;
 }
+
 int mlxsw_linecard_status_process(struct mlxsw_core *mlxsw_core,
 				  const char *mddq_pl)
 {
 	struct mlxsw_linecards *linecards = mlxsw_core_linecards(mlxsw_core);
 
 	return __mlxsw_linecard_status_process(mlxsw_core, linecards, NULL,
-					       mddq_pl, false);
+					       mddq_pl, false, false);
 }
 EXPORT_SYMBOL(mlxsw_linecard_status_process);
 
 static int mlxsw_linecard_status_get_and_process(struct mlxsw_core *mlxsw_core,
+						 struct mlxsw_linecards *linecards,
 						 struct mlxsw_linecard *linecard,
-						 bool process_provision_only)
+						 bool process_provision_only,
+						 bool tmp_delayed)
 {
-	struct mlxsw_linecards *linecards = mlxsw_core_linecards(mlxsw_core);
 	char mddq_pl[MLXSW_REG_MDDQ_LEN];
 	int err;
 
-	mlxsw_reg_mddq_pack(mddq_pl, linecard->slot_index, false,
-			    MLXSW_REG_MDDQ_QUERY_TYPE_SLOT_INFO);
+	mlxsw_reg_mddq_slot_info_pack(mddq_pl, linecard->slot_index, false);
 	err = mlxsw_reg_query(mlxsw_core, MLXSW_REG(mddq), mddq_pl);
 	if (err)
 		return err;
 
 	return __mlxsw_linecard_status_process(mlxsw_core, linecards, linecard,
-					       mddq_pl, process_provision_only);
+					       mddq_pl, process_provision_only, tmp_delayed);
 }
 
 static int mlxsw_linecard_init(struct mlxsw_core *mlxsw_core,
@@ -184,8 +253,10 @@ static int mlxsw_linecard_init(struct mlxsw_core *mlxsw_core,
 	linecard = mlxsw_linecard_get(linecards, slot_index);
 	linecard->slot_index = slot_index;
 	linecard->linecards = linecards;
+	mutex_init(&linecard->lock);
 
-	err = mlxsw_linecard_status_get_and_process(mlxsw_core, linecard, true);
+	err = mlxsw_linecard_status_get_and_process(mlxsw_core, linecards,
+						    linecard, true, false);
 	if (err)
 		goto err_status_get_and_process;
 
@@ -199,11 +270,14 @@ static int mlxsw_linecard_event_delivery_set(struct mlxsw_core *mlxsw_core,
 					     struct mlxsw_linecard *linecard,
 					     bool enable)
 {
+#if 0
 	char mddq_pl[MLXSW_REG_MDDQ_LEN];
 
-	mlxsw_reg_mddq_pack(mddq_pl, linecard->slot_index, enable,
-			    MLXSW_REG_MDDQ_QUERY_TYPE_SLOT_INFO);
+	mlxsw_reg_mddq_slot_info_pack(mddq_pl, linecard->slot_index, enable);
 	return mlxsw_reg_write(mlxsw_core, MLXSW_REG(mddq), mddq_pl);
+#else
+	return 0;
+#endif
 }
 
 static int mlxsw_linecard_post_init(struct mlxsw_core *mlxsw_core,
@@ -220,8 +294,8 @@ static int mlxsw_linecard_post_init(struct mlxsw_core *mlxsw_core,
 	if (err)
 		return err;
 
-	err = mlxsw_linecard_status_get_and_process(mlxsw_core, linecard,
-						    false);
+	err = mlxsw_linecard_status_get_and_process(mlxsw_core, linecards,
+						    linecard, false, false);
 	if (err)
 		goto err_status_get_and_process;
 
@@ -252,6 +326,7 @@ static void mlxsw_linecard_fini(struct mlxsw_core *mlxsw_core,
 }
 
 int mlxsw_linecards_init(struct mlxsw_core *mlxsw_core,
+			 const struct mlxsw_bus_info *bus_info,
 			 struct mlxsw_linecards **p_linecards)
 {
 	char mgpir_pl[MLXSW_REG_MGPIR_LEN];
@@ -278,6 +353,8 @@ int mlxsw_linecards_init(struct mlxsw_core *mlxsw_core,
 		return -ENOMEM;
 	linecards->count = slot_count;
 	linecards->mlxsw_core = mlxsw_core;
+	linecards->bus_info = bus_info;
+	INIT_LIST_HEAD(&linecards->event_ops_list);
 
 	for (i = 0; i < linecards->count; i++) {
 		err = mlxsw_linecard_init(mlxsw_core, linecards, i + 1);
@@ -285,7 +362,6 @@ int mlxsw_linecards_init(struct mlxsw_core *mlxsw_core,
 			goto err_linecard_init;
 	}
 
-	INIT_LIST_HEAD(&linecards->event_ops_list);
 	*p_linecards = linecards;
 
 	return 0;
@@ -310,11 +386,11 @@ int mlxsw_linecards_post_init(struct mlxsw_core *mlxsw_core,
 	for (i = 0; i < linecards->count; i++) {
 		err = mlxsw_linecard_post_init(mlxsw_core, linecards, i + 1);
 		if (err)
-			goto err_linecard_port_init;
+			goto err_linecard_post_init;
 	}
 	return 0;
 
-err_linecard_port_init:
+err_linecard_post_init:
 	for (i--; i >= 0; i--)
 		mlxsw_linecard_pre_fini(mlxsw_core, linecards, i + 1);
 
@@ -344,6 +420,7 @@ void mlxsw_linecards_fini(struct mlxsw_core *mlxsw_core,
 	WARN_ON(!list_empty(&linecards->event_ops_list));
 	for (i = 0; i < linecards->count; i++)
 		mlxsw_linecard_fini(mlxsw_core, linecards, i + 1);
+	kfree(linecards);
 }
 
 int mlxsw_linecards_event_ops_register(struct mlxsw_core *mlxsw_core,

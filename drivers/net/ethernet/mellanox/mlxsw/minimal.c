@@ -31,6 +31,7 @@ struct mlxsw_m {
 	struct mlxsw_m_area **linecards;
 	u8 max_ports;
 	u8 max_modules_per_slot;
+	u8 linecards_registered;
 };
 
 struct mlxsw_m_area {
@@ -38,6 +39,7 @@ struct mlxsw_m_area {
 	struct mlxsw_m_port **ports;
 	int *module_to_port;
 	u8 max_ports;
+	u8 module_off;
 };
 
 struct mlxsw_m_port {
@@ -123,11 +125,8 @@ mlxsw_m_port_dev_addr_get(struct mlxsw_m_port *mlxsw_m_port)
 	 * to be such it does not overflow when adding local_port
 	 * value.
 	 */
-	dev->dev_addr[ETH_ALEN - 1] = mlxsw_m_port->module + 1;
-	/* Add MAC address offset for slot. */
-	if (mlxsw_m_port->slot_index)
-		dev->dev_addr[ETH_ALEN - 1] += (mlxsw_m_port->slot_index - 1) *
-					       mlxsw_m->max_modules_per_slot;
+	dev->dev_addr[ETH_ALEN - 1] = mlxsw_m_port->module + 1 +
+				      mlxsw_m_area->module_off;
 	return 0;
 }
 
@@ -167,7 +166,7 @@ mlxsw_m_port_create(struct mlxsw_m_area *mlxsw_m_area, u8 slot_index,
 	struct net_device *dev;
 	int err;
 
-	err = mlxsw_core_port_init(mlxsw_m->core, local_port);
+	err = mlxsw_core_port_init(mlxsw_m->core, local_port, slot_index);
 	if (err) {
 		dev_err(mlxsw_m->bus_info->dev, "Port %d: Failed to init core port\n",
 			local_port);
@@ -185,7 +184,7 @@ mlxsw_m_port_create(struct mlxsw_m_area *mlxsw_m_area, u8 slot_index,
 	mlxsw_m_port->dev = dev;
 	mlxsw_m_port->mlxsw_m_area = mlxsw_m_area;
 	mlxsw_m_port->slot_index = slot_index;
-	mlxsw_m_port->local_port = module;
+	mlxsw_m_port->local_port = local_port;
 	mlxsw_m_port->module = module;
 
 	dev->netdev_ops = &mlxsw_m_port_netdev_ops;
@@ -200,7 +199,7 @@ mlxsw_m_port_create(struct mlxsw_m_area *mlxsw_m_area, u8 slot_index,
 
 	netif_carrier_off(dev);
 	mlxsw_m_port_switchdev_init(mlxsw_m_port);
-	mlxsw_m_area->ports[local_port] = mlxsw_m_port;
+	mlxsw_m_area->ports[module] = mlxsw_m_port;
 	err = register_netdev(dev);
 	if (err) {
 		dev_err(mlxsw_m->bus_info->dev, "Port %d: Failed to register netdev\n",
@@ -211,7 +210,7 @@ mlxsw_m_port_create(struct mlxsw_m_area *mlxsw_m_area, u8 slot_index,
 	return 0;
 
 err_register_netdev:
-	mlxsw_m_area->ports[local_port] = NULL;
+	mlxsw_m_area->ports[module] = NULL;
 	mlxsw_m_port_switchdev_fini(mlxsw_m_port);
 	free_netdev(dev);
 err_dev_addr_get:
@@ -222,12 +221,18 @@ err_alloc_etherdev:
 
 static void mlxsw_m_port_remove(struct mlxsw_m_area *mlxsw_m_area, u8 local_port)
 {
-	struct mlxsw_m_port *mlxsw_m_port = mlxsw_m_area->ports[local_port];
 	struct mlxsw_m *mlxsw_m = mlxsw_m_area->mlxsw_m;
+	struct mlxsw_m_port *mlxsw_m_port;
+	u8 port_to_area, off;
+
+	/* Map local port to area index. */
+	off = mlxsw_m_area->module_off;
+	port_to_area = off ? local_port % off : local_port;
+	mlxsw_m_port = mlxsw_m_area->ports[port_to_area];
 
 	mlxsw_core_port_clear(mlxsw_m->core, local_port, mlxsw_m);
 	unregister_netdev(mlxsw_m_port->dev); /* This calls ndo_stop */
-	mlxsw_m_area->ports[local_port] = NULL;
+	mlxsw_m_area->ports[port_to_area] = NULL;
 	mlxsw_m_port_switchdev_fini(mlxsw_m_port);
 	free_netdev(mlxsw_m_port->dev);
 	mlxsw_core_port_fini(mlxsw_m->core, local_port);
@@ -235,22 +240,25 @@ static void mlxsw_m_port_remove(struct mlxsw_m_area *mlxsw_m_area, u8 local_port
 
 static int mlxsw_m_ports_create(struct mlxsw_m_area *mlxsw_m_area, u8 slot_index)
 {
+	struct mlxsw_m *mlxsw_m = mlxsw_m_area->mlxsw_m;
 	char mgpir_pl[MLXSW_REG_MGPIR_LEN];
 	int i, err;
 
 	mlxsw_reg_mgpir_pack(mgpir_pl, slot_index);
-	err = mlxsw_reg_query(mlxsw_m_area->mlxsw_m->core, MLXSW_REG(mgpir),
-			      mgpir_pl);
+	err = mlxsw_reg_query(mlxsw_m->core, MLXSW_REG(mgpir), mgpir_pl);
 	if (err)
 		return err;
 
-	if (slot_index)
+	if (slot_index) {
 		mlxsw_reg_mgpir_unpack(mgpir_pl, NULL, NULL, NULL,
 				       &mlxsw_m_area->max_ports, NULL, NULL);
-	else
+		mlxsw_m_area->module_off = (slot_index - 1) *
+					   mlxsw_m->max_modules_per_slot;
+	} else {
 		mlxsw_reg_mgpir_unpack(mgpir_pl, NULL, NULL, NULL,
 				       &mlxsw_m_area->max_ports, NULL,
-				       &mlxsw_m_area->mlxsw_m->max_modules_per_slot);
+				       &mlxsw_m->max_modules_per_slot);
+	}
 
 	if (!mlxsw_m_area->max_ports)
 		return 0;
@@ -269,7 +277,7 @@ static int mlxsw_m_ports_create(struct mlxsw_m_area *mlxsw_m_area, u8 slot_index
 
 	/* Create port objects for each valid entry */
 	for (i = 0; i < mlxsw_m_area->max_ports; i++) {
-		mlxsw_m_area->module_to_port[i] = i;
+		mlxsw_m_area->module_to_port[i] = i + mlxsw_m_area->module_off;
 		err = mlxsw_m_port_create(mlxsw_m_area, slot_index,
 					  mlxsw_m_area->module_to_port[i], i);
 		if (err)
@@ -292,6 +300,9 @@ static void mlxsw_m_ports_remove(struct mlxsw_m_area *mlxsw_m_area)
 {
 	int i;
 
+	if (!mlxsw_m_area->max_ports)
+		return;
+
 	for (i = 0; i < mlxsw_m_area->max_ports; i++)
 		mlxsw_m_port_remove(mlxsw_m_area, mlxsw_m_area->module_to_port[i]);
 
@@ -306,10 +317,12 @@ static void mlxsw_m_sys_event_handler(struct mlxsw_core *mlxsw_core)
 	char mddq_pl[MLXSW_REG_MDDQ_LEN];
 	int i, err;
 
+	if (!mlxsw_m->linecards_registered || !linecards)
+		return;
+
 	/* Handle line cards, for which active status has been changed. */
 	for (i = 1; i <= linecards->count; i++) {
-		mlxsw_reg_mddq_pack(mddq_pl, MLXSW_REG_MDDQ_QUERY_TYPE_SLOT_INFO,
-				    false, i);
+		mlxsw_reg_mddq_slot_info_pack(mddq_pl, i, false);
 		err = mlxsw_reg_query(mlxsw_m->core, MLXSW_REG(mddq), mddq_pl);
 		if (err)
 			dev_err(mlxsw_m->bus_info->dev, "Fail to query MDDQ register for slot %d\n",
@@ -319,34 +332,63 @@ static void mlxsw_m_sys_event_handler(struct mlxsw_core *mlxsw_core)
 	}
 }
 
-static void
-mlxsw_m_got_ready(struct mlxsw_core *mlxsw_core, u8 slot_index,
-		  const struct mlxsw_linecard *linecard, void *priv)
+static int
+mlxsw_m_got_provisioned(struct mlxsw_core *mlxsw_core, u8 slot_index,
+			const struct mlxsw_linecard *linecard, void *priv)
 {
 	struct mlxsw_m *mlxsw_m = priv;
-	struct mlxsw_m_area *mlxsw_m_area = mlxsw_m->linecards[slot_index - 1];
+	struct mlxsw_m_area *lc;
 	int err;
 
-	err = mlxsw_m_ports_create(mlxsw_m_area, slot_index);
+	/* Check if linecard is already provisioned. */
+	if (mlxsw_m->linecards[slot_index - 1])
+		return 0;
+
+	lc = kzalloc(sizeof(*lc), GFP_KERNEL);
+	if (!lc)
+		return -ENOMEM;
+
+	lc->mlxsw_m = mlxsw_m;
+	mlxsw_m->linecards[slot_index - 1] = lc;
+	err = mlxsw_m_ports_create(lc, slot_index);
+printk("%s slot_index %d lc->max_ports %d core %p\n", __func__, slot_index, lc->max_ports, lc->mlxsw_m->core);
 	if (err) {
-		dev_err(mlxsw_m->bus_info->dev, "Failed to create ports for line card at slot %d\n",
+		dev_err(mlxsw_m->bus_info->dev, "Failed to set line card at slot %d\n",
 			slot_index);
+		goto mlxsw_m_ports_create_fail;
 	}
+
+	/* Rollback if ports are not found on line card. */
+	if (!lc->max_ports) {
+		err = -ENODEV;
+		goto mlxsw_m_ports_create_fail;
+	}
+
+	return 0;
+
+mlxsw_m_ports_create_fail:
+	kfree(lc);
+	return err;
 }
 
 static void
-mlxsw_m_got_unready(struct mlxsw_core *mlxsw_core, u8 slot_index,
-		    const struct mlxsw_linecard *linecard, void *priv)
+mlxsw_m_got_unprovisioned(struct mlxsw_core *mlxsw_core, u8 slot_index,
+			  const struct mlxsw_linecard *linecard, void *priv)
 {
 	struct mlxsw_m *mlxsw_m = priv;
-	struct mlxsw_m_area *mlxsw_m_area = mlxsw_m->linecards[slot_index - 1];
+	struct mlxsw_m_area *lc = mlxsw_m->linecards[slot_index - 1];
+printk("%s slot_index %d\n", __func__, slot_index);
 
-	mlxsw_m_ports_remove(mlxsw_m_area);
+	if (!lc)
+		return;
+
+	mlxsw_m_ports_remove(lc);
+	kfree(lc);
 }
 
 static struct mlxsw_linecards_event_ops mlxsw_m_event_ops = {
-	.got_ready = mlxsw_m_got_ready,
-	.got_unready = mlxsw_m_got_unready,
+	.got_provisioned = mlxsw_m_got_provisioned,
+	.got_unprovisioned = mlxsw_m_got_unprovisioned,
 };
 
 static int mlxsw_m_linecards_register(struct mlxsw_m *mlxsw_m)
@@ -368,6 +410,8 @@ static int mlxsw_m_linecards_register(struct mlxsw_m *mlxsw_m)
 	if (err)
 		goto err_linecards_event_ops_register;
 
+	mlxsw_m->linecards_registered = 1;
+
 	return 0;
 
 err_linecards_event_ops_register:
@@ -381,6 +425,8 @@ static void mlxsw_m_linecards_unregister(struct mlxsw_m *mlxsw_m)
 
 	if (!linecards || !linecards->count)
 		return;
+
+	mlxsw_m->linecards_registered = 0;
 
 	mlxsw_linecards_event_ops_unregister(mlxsw_m->core,
 					     &mlxsw_m_event_ops, mlxsw_m);

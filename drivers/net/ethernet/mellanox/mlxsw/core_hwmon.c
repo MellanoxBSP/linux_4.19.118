@@ -392,10 +392,7 @@ mlxsw_hwmon_gbox_temp_label_show(struct device *dev,
 	int index = mlxsw_hwmon_attr->type_index -
 		    mlxsw_hwmon_dev->module_sensor_max + 1;
 
-	if (strlen(mlxsw_hwmon_dev->name))
-		return sprintf(buf, "%s gearbox %03u\n", mlxsw_hwmon_dev->name, index);
-	else
-		return sprintf(buf, "gearbox %03u\n", index);
+	return sprintf(buf, "gearbox %03u\n", index);
 }
 
 enum mlxsw_hwmon_attr_type {
@@ -605,14 +602,13 @@ static int mlxsw_hwmon_module_init(struct mlxsw_hwmon_dev *mlxsw_hwmon_dev)
 	if (!mlxsw_core_res_query_enabled(mlxsw_hwmon->core))
 		return 0;
 
-	mlxsw_reg_mgpir_pack(mgpir_pl, 0);
+	mlxsw_reg_mgpir_pack(mgpir_pl, mlxsw_hwmon_dev->slot_index);
 	err = mlxsw_reg_query(mlxsw_hwmon->core, MLXSW_REG(mgpir), mgpir_pl);
 	if (err)
 		return err;
 
 	mlxsw_reg_mgpir_unpack(mgpir_pl, NULL, NULL, NULL,
 			       &module_sensor_max, NULL, NULL);
-
 	/* Add extra attributes for module temperature. Sensor index is
 	 * assigned to sensor_count value, while all indexed before
 	 * sensor_count are already utilized by the sensors connected through
@@ -732,29 +728,33 @@ mlxsw_hwmon_got_active(struct mlxsw_core *mlxsw_core, u8 slot_index,
 		       const struct mlxsw_linecard *linecard, void *priv)
 {
 	struct mlxsw_hwmon *hwmon = priv;
-	struct mlxsw_hwmon_dev *lc = hwmon->linecards[slot_index - 1];
 	struct device *dev = hwmon->bus_info->dev;
 	struct mlxsw_env_gearbox_sensors_map map;
+	struct mlxsw_hwmon_dev *lc;
 	int err;
 
+	lc = kzalloc(sizeof(*lc), GFP_KERNEL);
+	if (!lc)
+		return;
+	lc->slot_index = slot_index;
+	lc->hwmon = hwmon;
 	err = mlxsw_hwmon_module_init(lc);
 	if (err)
 		goto err_hwmon_linecard_module_init;
 
-	map.sensor_bit_map = lc->gearbox_sensor_map;
 	err = mlxsw_env_sensor_map_create(hwmon->core,
 					  hwmon->bus_info, slot_index,
 					  &map);
 	if (err)
 		goto err_hwmon_linecard_env_sensor_map_create;
 
+	lc->gearbox_sensor_map = map.sensor_bit_map;
 	err = mlxsw_hwmon_gearbox_init(lc, map.sensor_count);
 	if (err)
 		goto err_hwmon_linecard_gearbox_init;
 
 	lc->groups[0] = &lc->group;
 	lc->group.attrs = lc->attrs;
-	lc->slot_index = slot_index;
 	sprintf(lc->name, "%s#%02u", "linecard", slot_index);
 	lc->hwmon_dev = hwmon_device_register_with_groups(dev, (const char *) lc->name,
 							  lc, lc->groups);
@@ -762,6 +762,7 @@ mlxsw_hwmon_got_active(struct mlxsw_core *mlxsw_core, u8 slot_index,
 		err = PTR_ERR(lc->hwmon_dev);
 		goto err_hwmon_linecard_register;
 	}
+	hwmon->linecards[slot_index - 1] = lc;
 
 	return;
 
@@ -771,7 +772,7 @@ err_hwmon_linecard_gearbox_init:
 				     lc->gearbox_sensor_map);
 err_hwmon_linecard_env_sensor_map_create:
 err_hwmon_linecard_module_init:
-	return;
+	kfree(lc);
 }
 
 static void
@@ -785,6 +786,7 @@ mlxsw_hwmon_got_inactive(struct mlxsw_core *mlxsw_core, u8 slot_index,
 		hwmon_device_unregister(lc->hwmon_dev);
 	mlxsw_env_sensor_map_destroy(hwmon->bus_info,
 				     lc->gearbox_sensor_map);
+	kfree(lc);
 	hwmon->linecards[slot_index - 1] = NULL;
 }
 
@@ -800,7 +802,7 @@ static int mlxsw_hwmon_linecards_register(struct mlxsw_hwmon *hwmon)
 
 	if (!linecards || !linecards->count)
 		return 0;
-
+printk("%s(%d) linecards->count %d\n", __func__, __LINE__, linecards->count);
 	hwmon->linecards = kcalloc(linecards->count, sizeof(*hwmon->linecards),
 				   GFP_KERNEL);
 	if (!hwmon->linecards)

@@ -117,7 +117,8 @@ int mlxsw_qsfp_init(struct mlxsw_core *mlxsw_core,
 	if (!strcmp(mlxsw_bus_info->device_kind, "i2c"))
 		return 0;
 
-	dmi_check_system(mlxsw_qsfp_dmi_table);
+	if (!dmi_check_system(mlxsw_qsfp_dmi_table))
+		return;
 
 	mlxsw_qsfp = devm_kzalloc(mlxsw_bus_info->dev, sizeof(*mlxsw_qsfp),
 				  GFP_KERNEL);
@@ -164,6 +165,9 @@ err_create_cpld_file:
 void mlxsw_qsfp_fini(struct mlxsw_qsfp *mlxsw_qsfp)
 {
 	int i;
+
+	if (!dmi_check_system(mlxsw_qsfp_dmi_table))
+		return;
 
 	for (i = 0; i < mlxsw_qsfp_cpld_num; i++)
 		sysfs_remove_file(&mlxsw_qsfp->bus_info->dev->kobj,

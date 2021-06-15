@@ -52,6 +52,12 @@
 #define MLXSW_I2C_TIMEOUT_MSECS		5000
 #define MLXSW_I2C_MAX_DATA_SIZE		256
 
+#define MLXSW_I2C_WORK_ARMED		1
+#define MLXSW_I2C_WORK_CLOSED		GENMASK(31, 0)
+#define MLXSW_I2C_WORK_DELAY		(usecs_to_jiffies(100))
+#define MLXSW_I2C_DEFAULT_IRQ		17
+#define MLXSW_I2C_VIRT_SLAVE		0x37
+
 /**
  * struct mlxsw_i2c - device private data:
  * @cmd.mb_size_in: input mailbox size;
@@ -67,6 +73,9 @@
  * @dwork_irq: interrupts delayed work queue;
  * @lock - lock for interrupts sync;
  * @sys_event_handler: system events handler callback;
+ * @irq: IRQ line number;
+ * @irq_unhandled_count: number of unhandled interrupts;
+ * @access_prohibited: access to device is prohibited during remove;
  */
 struct mlxsw_i2c {
 	struct {
@@ -84,6 +93,9 @@ struct mlxsw_i2c {
 	struct delayed_work dwork_irq;
 	spinlock_t lock; /* sync with interrupt */
 	void (*sys_event_handler)(struct mlxsw_core *mlxsw_core);
+	int irq;
+	atomic_t irq_unhandled_count;
+	int access_prohibited;
 };
 
 #define MLXSW_I2C_READ_MSG(_client, _addr_buf, _buf, _len) {	\
@@ -498,6 +510,10 @@ static int mlxsw_i2c_cmd_exec(void *bus_priv, u16 opcode, u8 opcode_mod,
 {
 	struct mlxsw_i2c *mlxsw_i2c = bus_priv;
 
+	if (mlxsw_i2c->access_prohibited) {
+dev_info(mlxsw_i2c->bus_info.dev, "Access prohibited\n");
+		return -EBUSY;}
+
 	return mlxsw_i2c_cmd(mlxsw_i2c->dev, opcode, in_mod, in_mbox_size,
 			     in_mbox, out_mbox_size, out_mbox, status);
 }
@@ -562,6 +578,12 @@ static void mlxsw_i2c_work_handler(struct work_struct *work)
 	unsigned long flags;
 
 	mlxsw_i2c = container_of(work, struct mlxsw_i2c, dwork_irq.work);
+
+	if (atomic_read(&mlxsw_i2c->irq_unhandled_count)) {
+		if (atomic_dec_and_test(&mlxsw_i2c->irq_unhandled_count))
+			return;
+	}
+
 	mlxsw_i2c->sys_event_handler(mlxsw_i2c->core);
 
 	spin_lock_irqsave(&mlxsw_i2c->lock, flags);
@@ -574,9 +596,12 @@ static void mlxsw_i2c_work_handler(struct work_struct *work)
 	 * signals have been received during masking.
 	 */
 	cancel_delayed_work(&mlxsw_i2c->dwork_irq);
-	schedule_delayed_work(&mlxsw_i2c->dwork_irq, 0);
+	schedule_delayed_work(&mlxsw_i2c->dwork_irq, MLXSW_I2C_WORK_DELAY);
 
 	spin_unlock_irqrestore(&mlxsw_i2c->lock, flags);
+
+	if (!atomic_read(&mlxsw_i2c->irq_unhandled_count))
+		atomic_set(&mlxsw_i2c->irq_unhandled_count, MLXSW_I2C_WORK_ARMED);
 }
 
 static irqreturn_t mlxsw_i2c_irq_handler(int irq, void *dev)
@@ -586,7 +611,7 @@ static irqreturn_t mlxsw_i2c_irq_handler(int irq, void *dev)
 	/* Schedule work task for immediate execution.*/
 	schedule_delayed_work(&mlxsw_i2c->dwork_irq, 0);
 
-	return IRQ_HANDLED;
+	return IRQ_NONE;
 }
 
 static int mlxsw_i2c_event_handler_register(struct mlxsw_i2c *mlxsw_i2c)
@@ -596,11 +621,18 @@ static int mlxsw_i2c_event_handler_register(struct mlxsw_i2c *mlxsw_i2c)
 	/* Initialize interrupt handler if system hotplug driver is reachable
 	 * and platform data is available.
 	 */
-	if (!IS_REACHABLE(CONFIG_MLXREG_HOTPLUG) || !mlxsw_i2c->pdata || !mlxsw_i2c->pdata->irq)
+	if (!IS_REACHABLE(CONFIG_MLXREG_HOTPLUG))
 		return 0;
 
-	err = devm_request_irq(mlxsw_i2c->dev, mlxsw_i2c->pdata->irq, mlxsw_i2c_irq_handler,
-			       IRQF_TRIGGER_FALLING | IRQF_SHARED, "mlxsw-i2c", mlxsw_i2c);
+	if (mlxsw_i2c->pdata && mlxsw_i2c->pdata->irq)
+		mlxsw_i2c->irq = mlxsw_i2c->pdata->irq;
+
+	if (!mlxsw_i2c->irq)
+		return 0;
+
+	err = request_irq(mlxsw_i2c->irq, mlxsw_i2c_irq_handler,
+			  IRQF_TRIGGER_FALLING | IRQF_SHARED, "mlxsw-i2c",
+			  mlxsw_i2c);
 	if (err) {
 		dev_err(mlxsw_i2c->bus_info.dev, "Failed to request irq: %d\n",
 			err);
@@ -615,10 +647,11 @@ static int mlxsw_i2c_event_handler_register(struct mlxsw_i2c *mlxsw_i2c)
 
 static void mlxsw_i2c_event_handler_unregister(struct mlxsw_i2c *mlxsw_i2c)
 {
-	if (!IS_REACHABLE(CONFIG_MLXREG_HOTPLUG) || !mlxsw_i2c->pdata || !mlxsw_i2c->pdata->irq)
+	if (!IS_REACHABLE(CONFIG_MLXREG_HOTPLUG) || !mlxsw_i2c->irq)
 		return;
+	cancel_delayed_work_sync(&mlxsw_i2c->dwork_irq);
+	free_irq(mlxsw_i2c->irq, mlxsw_i2c);
 
-	devm_free_irq(mlxsw_i2c->bus_info.dev, mlxsw_i2c->pdata->irq, mlxsw_i2c);
 }
 
 static const struct mlxsw_bus mlxsw_i2c_bus = {
@@ -723,10 +756,13 @@ static int mlxsw_i2c_probe(struct i2c_client *client,
 		return err;
 	}
 
+	if (client->addr == MLXSW_I2C_VIRT_SLAVE)
+		mlxsw_i2c->irq = MLXSW_I2C_DEFAULT_IRQ;
 	err = mlxsw_i2c_event_handler_register(mlxsw_i2c);
 	if (err)
 		return err;
 
+	atomic_set(&mlxsw_i2c->irq_unhandled_count, 0);
 	dev_info(&client->dev, "Firmware revision: %d.%d.%d\n",
 		 mlxsw_i2c->bus_info.fw_rev.major,
 		 mlxsw_i2c->bus_info.fw_rev.minor,
@@ -744,6 +780,8 @@ static int mlxsw_i2c_remove(struct i2c_client *client)
 {
 	struct mlxsw_i2c *mlxsw_i2c = i2c_get_clientdata(client);
 
+	mlxsw_i2c->access_prohibited = 1;
+	atomic_set(&mlxsw_i2c->irq_unhandled_count, MLXSW_I2C_WORK_CLOSED);
 	mlxsw_i2c_event_handler_unregister(mlxsw_i2c);
 	mlxsw_core_bus_device_unregister(mlxsw_i2c->core, false);
 	mutex_destroy(&mlxsw_i2c->cmd.lock);
