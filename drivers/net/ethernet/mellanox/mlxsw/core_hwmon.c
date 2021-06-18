@@ -802,7 +802,7 @@ static int mlxsw_hwmon_linecards_register(struct mlxsw_hwmon *hwmon)
 
 	if (!linecards || !linecards->count)
 		return 0;
-printk("%s(%d) linecards->count %d\n", __func__, __LINE__, linecards->count);
+
 	hwmon->linecards = kcalloc(linecards->count, sizeof(*hwmon->linecards),
 				   GFP_KERNEL);
 	if (!hwmon->linecards)
@@ -814,6 +814,8 @@ printk("%s(%d) linecards->count %d\n", __func__, __LINE__, linecards->count);
 	if (err)
 		goto err_linecards_event_ops_register;
 
+	return 0;
+
 err_linecards_event_ops_register:
 	kfree(hwmon->linecards);
 	return err;
@@ -822,9 +824,15 @@ err_linecards_event_ops_register:
 static void mlxsw_hwmon_linecards_unregister(struct mlxsw_hwmon *hwmon)
 {
 	struct mlxsw_linecards *linecards = mlxsw_core_linecards(hwmon->core);
+	int i;
 
 	if (!linecards || !linecards->count)
 		return;
+
+	for (i = 1; i <= linecards->count; i++) {
+		if (hwmon->linecards[i - 1])
+			mlxsw_hwmon_got_inactive(hwmon->core, i, NULL, hwmon);
+	}
 
 	mlxsw_linecards_event_ops_unregister(hwmon->core,
 					     &mlxsw_hwmon_event_ops, hwmon);

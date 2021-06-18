@@ -333,8 +333,10 @@ int mlxsw_env_sensor_map_create(struct mlxsw_core *core,
 		return err;
 
 	mlxsw_reg_mtecr_unpack(mtecr_pl, &map->sensor_count, &last_sensor, NULL);
-	if (!map->sensor_count)
+	if (!map->sensor_count) {
+		map->sensor_bit_map = NULL;
 		return 0;
+	}
 
 	/* Fill out sensor mapping array. */
 	map->sensor_bit_map = kcalloc(map->sensor_count, sizeof(u16), GFP_KERNEL);
@@ -353,6 +355,7 @@ EXPORT_SYMBOL(mlxsw_env_sensor_map_create);
 void mlxsw_env_sensor_map_destroy(const struct mlxsw_bus_info *bus_info,
 				  u16 *sensor_bit_map)
 {
-	kfree(sensor_bit_map);
+	if (sensor_bit_map)
+		kfree(sensor_bit_map);
 }
 EXPORT_SYMBOL(mlxsw_env_sensor_map_destroy);

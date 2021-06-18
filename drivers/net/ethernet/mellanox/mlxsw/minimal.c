@@ -351,7 +351,6 @@ mlxsw_m_got_provisioned(struct mlxsw_core *mlxsw_core, u8 slot_index,
 	lc->mlxsw_m = mlxsw_m;
 	mlxsw_m->linecards[slot_index - 1] = lc;
 	err = mlxsw_m_ports_create(lc, slot_index);
-printk("%s slot_index %d lc->max_ports %d core %p\n", __func__, slot_index, lc->max_ports, lc->mlxsw_m->core);
 	if (err) {
 		dev_err(mlxsw_m->bus_info->dev, "Failed to set line card at slot %d\n",
 			slot_index);
@@ -377,18 +376,31 @@ mlxsw_m_got_unprovisioned(struct mlxsw_core *mlxsw_core, u8 slot_index,
 {
 	struct mlxsw_m *mlxsw_m = priv;
 	struct mlxsw_m_area *lc = mlxsw_m->linecards[slot_index - 1];
-printk("%s slot_index %d\n", __func__, slot_index);
 
 	if (!lc)
 		return;
 
 	mlxsw_m_ports_remove(lc);
 	kfree(lc);
+	mlxsw_m->linecards[slot_index - 1] = NULL;
 }
 
+static void
+_mlxsw_m_got_provisioned(struct mlxsw_core *mlxsw_core, u8 slot_index,
+			 const struct mlxsw_linecard *linecard, void *priv)
+{
+	mlxsw_m_got_provisioned(mlxsw_core, slot_index, linecard, priv);
+}
+/*
 static struct mlxsw_linecards_event_ops mlxsw_m_event_ops = {
 	.got_provisioned = mlxsw_m_got_provisioned,
 	.got_unprovisioned = mlxsw_m_got_unprovisioned,
+};
+*/
+
+static struct mlxsw_linecards_event_ops mlxsw_m_event_ops = {
+	.got_active = _mlxsw_m_got_provisioned,
+	.got_inactive = mlxsw_m_got_unprovisioned,
 };
 
 static int mlxsw_m_linecards_register(struct mlxsw_m *mlxsw_m)
@@ -422,9 +434,15 @@ err_linecards_event_ops_register:
 static void mlxsw_m_linecards_unregister(struct mlxsw_m *mlxsw_m)
 {
 	struct mlxsw_linecards *linecards = mlxsw_core_linecards(mlxsw_m->core);
+	int i;
 
 	if (!linecards || !linecards->count)
 		return;
+
+	for (i = 1; i <= linecards->count; i++) {
+		if (mlxsw_m->linecards[i - 1])
+			mlxsw_m_got_unprovisioned(mlxsw_m->core, i, NULL, mlxsw_m);
+	}
 
 	mlxsw_m->linecards_registered = 0;
 
