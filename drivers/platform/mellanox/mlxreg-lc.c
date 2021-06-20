@@ -42,7 +42,7 @@ enum mlxreg_lc_type {
  * enum mlxreg_lc_state - line cards state
  *
  * @MLXREG_LC_INITIALIZED: line card is initialized;
- * @MLXREG_LC_POWERD: line card is powered;
+ * @MLXREG_LC_POWERED: line card is powered;
  * @MLXREG_LC_SYNCED: line card is syncronized between hardware and firmware;
  */
 enum mlxreg_lc_state {

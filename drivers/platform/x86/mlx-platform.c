@@ -50,6 +50,9 @@
 #define MLXPLAT_CPLD_LPC_REG_WP1_OFFSET		0x31
 #define MLXPLAT_CPLD_LPC_REG_GP2_OFFSET		0x32
 #define MLXPLAT_CPLD_LPC_REG_WP2_OFFSET		0x33
+#define MLXPLAT_CPLD_LPC_REG_FIELD_UPGRADE	0x34
+#define MLXPLAT_CPLD_LPC_SAFE_BIOS_OFFSET	0x35
+#define MLXPLAT_CPLD_LPC_SAFE_BIOS_WP_OFFSET	0x36
 #define MLXPLAT_CPLD_LPC_REG_PWM_CONTROL_OFFSET	0x37
 #define MLXPLAT_CPLD_LPC_REG_AGGR_OFFSET	0x3a
 #define MLXPLAT_CPLD_LPC_REG_AGGR_MASK_OFFSET	0x3b
@@ -3566,6 +3569,12 @@ static struct mlxreg_core_data mlxplat_mlxcpld_modular_regs_io_data[] = {
 		.mode = 0200,
 	},
 	{
+		.label = "auto_power_mode",
+		.reg = MLXPLAT_CPLD_LPC_REG_GP1_OFFSET,
+		.mask = GENMASK(7, 0) & ~BIT(6),
+		.mode = 0644,
+	},
+	{
 		.label = "pm_mgmt_en",
 		.reg = MLXPLAT_CPLD_LPC_REG_GP1_OFFSET,
 		.mask = GENMASK(7, 0) & ~BIT(7),
@@ -3573,14 +3582,21 @@ static struct mlxreg_core_data mlxplat_mlxcpld_modular_regs_io_data[] = {
 	},
 	{
 		.label = "jtag_enable",
-		.reg = MLXPLAT_CPLD_LPC_REG_GP2_OFFSET,
-		.mask = GENMASK(7, 0) & ~BIT(4),
+		.reg = MLXPLAT_CPLD_LPC_REG_FIELD_UPGRADE,
+		.mask = GENMASK(3, 0),
+		.bit = 1,
 		.mode = 0644,
 	},
 	{
-		.label = "os_ready",
-		.reg = MLXPLAT_CPLD_LPC_REG_GP2_OFFSET,
-		.mask = GENMASK(7, 0) & ~BIT(6),
+		.label = "safe_bios_dis",
+		.reg = MLXPLAT_CPLD_LPC_SAFE_BIOS_OFFSET,
+		.mask = GENMASK(7, 0) & ~BIT(5),
+		.mode = 0444,
+	},
+	{
+		.label = "safe_bios_dis_wp",
+		.reg = MLXPLAT_CPLD_LPC_SAFE_BIOS_WP_OFFSET,
+		.mask = GENMASK(7, 0) & ~BIT(5),
 		.mode = 0444,
 	},
 	{
@@ -4136,6 +4152,9 @@ static bool mlxplat_mlxcpld_writeable_reg(struct device *dev, unsigned int reg)
 	case MLXPLAT_CPLD_LPC_REG_WP1_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_GP2_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_WP2_OFFSET:
+	case MLXPLAT_CPLD_LPC_REG_FIELD_UPGRADE:
+	case MLXPLAT_CPLD_LPC_SAFE_BIOS_OFFSET:
+	case MLXPLAT_CPLD_LPC_SAFE_BIOS_WP_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_AGGR_MASK_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_AGGRLO_MASK_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_AGGRCO_MASK_OFFSET:
@@ -4213,6 +4232,9 @@ static bool mlxplat_mlxcpld_readable_reg(struct device *dev, unsigned int reg)
 	case MLXPLAT_CPLD_LPC_REG_WP1_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_GP2_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_WP2_OFFSET:
+	case MLXPLAT_CPLD_LPC_REG_FIELD_UPGRADE:
+	case MLXPLAT_CPLD_LPC_SAFE_BIOS_OFFSET:
+	case MLXPLAT_CPLD_LPC_SAFE_BIOS_WP_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_AGGR_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_AGGR_MASK_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_AGGRLO_OFFSET:
@@ -4330,6 +4352,9 @@ static bool mlxplat_mlxcpld_volatile_reg(struct device *dev, unsigned int reg)
 	case MLXPLAT_CPLD_LPC_REG_GP_RST_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_GP1_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_GP2_OFFSET:
+	case MLXPLAT_CPLD_LPC_REG_FIELD_UPGRADE:
+	case MLXPLAT_CPLD_LPC_SAFE_BIOS_OFFSET:
+	case MLXPLAT_CPLD_LPC_SAFE_BIOS_WP_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_AGGR_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_AGGR_MASK_OFFSET:
 	case MLXPLAT_CPLD_LPC_REG_AGGRLO_OFFSET:
