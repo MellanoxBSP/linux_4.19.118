@@ -121,7 +121,7 @@ static int mlxreg_hotplug_device_create(struct mlxreg_hotplug_priv_data *priv,
 	 */
 	if (data->hpdev.nr < 0)
 		return 0;
-dev_info(priv->dev, "label %s action %d kind %d\n", data->label, data->hpdev.action, kind);
+
 	pdata = dev_get_platdata(&priv->pdev->dev);
 	switch (data->hpdev.action) {
 	case MLXREG_HOTPLUG_DEVICE_DEFAULT_ACTION:

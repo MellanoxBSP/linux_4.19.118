@@ -565,9 +565,6 @@ static int mlxreg_lc_event_handler(void *handle, enum mlxreg_hotplug_kind kind, 
 	struct mlxreg_lc *mlxreg_lc = handle;
 	int err = 0;
 
-	dev_info(mlxreg_lc->dev, "linecard#%d state %d event kind %d action %d\n",
-		 mlxreg_lc->data->slot, mlxreg_lc->state, kind, action);
-
 	if (!(mlxreg_lc->state & MLXREG_LC_INITIALIZED))
 		return 0;
 
@@ -602,11 +599,10 @@ static int mlxreg_lc_event_handler(void *handle, enum mlxreg_hotplug_kind kind, 
 							      mlxreg_lc->main_devs_num);
 			if (err)
 				return err;
-#if 0
+
 			/* In case line card is already in ready state - enable it. */
 			if (mlxreg_lc->state & MLXREG_LC_CONFIGURED)
 				err = mlxreg_lc_enable_disable(mlxreg_lc, 1);
-#endif
 		} else {
 			mlxreg_lc_destroy_static_devices(mlxreg_lc, mlxreg_lc->main_devs,
 							 mlxreg_lc->main_devs_num);
@@ -664,7 +660,7 @@ static int mlxreg_lc_completion_notify(void *handle, struct i2c_adapter *parent,
 	}
 
 	/* Verify if line card is powered. */
-	err = regmap_read(mlxreg_lc->par_regmap, mlxreg_lc->data->reg_prsnt, &regval);
+	err = regmap_read(mlxreg_lc->par_regmap, mlxreg_lc->data->reg_pwr, &regval);
 	if (err)
 		goto mlxreg_lc_regmap_read_power_fail;
 
@@ -683,13 +679,14 @@ static int mlxreg_lc_completion_notify(void *handle, struct i2c_adapter *parent,
 		goto mlxreg_lc_regmap_read_sync_fail;
 
 	/* Power on line card if necessary. */
-	if (regval & mlxreg_lc->data->mask && mlxreg_lc->state & MLXREG_LC_SYNCED) {
-		err = mlxreg_lc_power_on_off(mlxreg_lc, 1);
-		if (err)
-			goto mlxreg_lc_regmap_power_on_off_fail;
-
+	if (regval & mlxreg_lc->data->mask) {
 		mlxreg_lc->state |= MLXREG_LC_SYNCED;
 		mlxreg_lc_state_update(mlxreg_lc, MLXREG_LC_SYNCED, 1);
+		if (mlxreg_lc->state & ~MLXREG_LC_POWERED) {
+			err = mlxreg_lc_power_on_off(mlxreg_lc, 1);
+			if (err)
+				goto mlxreg_lc_regmap_power_on_off_fail;
+		}
 	}
 
 	mlxreg_lc_state_update(mlxreg_lc, MLXREG_LC_INITIALIZED, 1);
@@ -875,6 +872,12 @@ static int mlxreg_lc_remove(struct platform_device *pdev)
 {
 	struct mlxreg_core_data *data = dev_get_platdata(&pdev->dev);
 	struct mlxreg_lc *mlxreg_lc = platform_get_drvdata(pdev);
+
+	/* Clear event notification callback. */
+	if (data->notifier) {
+		data->notifier->user_handler = NULL;
+		data->notifier->handle = NULL;
+	}
 
 	/* Destroy static I2C device feeding by main power. */
 	mlxreg_lc_destroy_static_devices(mlxreg_lc, mlxreg_lc->main_devs,
