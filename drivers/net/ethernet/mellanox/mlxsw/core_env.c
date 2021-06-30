@@ -348,7 +348,7 @@ int mlxsw_env_sensor_map_create(struct mlxsw_core *core,
 			map->sensor_bit_map[i++] = bit;
 	}
 
- 	return 0;
+	return 0;
 }
 EXPORT_SYMBOL(mlxsw_env_sensor_map_create);
 

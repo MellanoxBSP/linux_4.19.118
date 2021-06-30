@@ -371,14 +371,13 @@ mlxsw_hwmon_module_temp_label_show(struct device *dev,
 	struct mlxsw_hwmon_attr *mlxsw_hwmon_attr =
 			container_of(attr, struct mlxsw_hwmon_attr, dev_attr);
 	struct mlxsw_hwmon_dev *mlxsw_hwmon_dev;
+	int index = mlxsw_hwmon_attr->type_index;
 
 	mlxsw_hwmon_dev = mlxsw_hwmon_attr->mlxsw_hwmon_dev;
 	if (strlen(mlxsw_hwmon_dev->name))
-		return sprintf(buf, "%s front panel %03u\n", mlxsw_hwmon_dev->name,
-			       mlxsw_hwmon_attr->type_index);
-	else
-		return sprintf(buf, "front panel %03u\n",
-			       mlxsw_hwmon_attr->type_index);
+		index += 1;
+
+	return sprintf(buf, "front panel %03u\n", index);
 }
 
 static ssize_t
