@@ -43,7 +43,7 @@ enum mlxreg_lc_type {
  *
  * @MLXREG_LC_INITIALIZED: line card is initialized;
  * @MLXREG_LC_POWERED: line card is powered;
- * @MLXREG_LC_SYNCED: line card is syncronized between hardware and firmware;
+ * @MLXREG_LC_SYNCED: line card is synchronized between hardware and firmware;
  */
 enum mlxreg_lc_state {
 	MLXREG_LC_INITIALIZED = BIT(0),
@@ -154,7 +154,6 @@ static const struct regmap_config mlxreg_lc_regmap_conf = {
 	.val_bits = 8,
 	.max_register = MLXREG_LC_REG_MAX,
 	.cache_type = REGCACHE_FLAT,
-	.val_format_endian = REGMAP_ENDIAN_BIG,
 	.writeable_reg = mlxreg_lc_writeable_reg,
 	.readable_reg = mlxreg_lc_readable_reg,
 	.volatile_reg = mlxreg_lc_volatile_reg,
@@ -342,7 +341,7 @@ static struct mlxreg_core_data mlxreg_lc_io_data[] = {
 		.mode = 0444,
 	},
 	{
-		.label = "lc_pwr_en",
+		.label = "reset_line_card_pwr_en",
 		.reg = MLXREG_LC_REG_RESET_CAUSE_OFFSET,
 		.mask = GENMASK(7, 0) & ~BIT(7),
 		.mode = 0444,
