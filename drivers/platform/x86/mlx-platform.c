@@ -1238,22 +1238,11 @@ struct mlxreg_core_hotplug_platform_data mlxplat_mlxcpld_lc_act = {
 	.irq = MLXPLAT_CPLD_LPC_SYSIRQ,
 };
 
-static struct i2c_board_info mlxplat_mlxcpld_chip_i2c_dev[] = {
-	{
-		I2C_BOARD_INFO("mlxsw_minimal", 0x37),
-		.platform_data = &mlxplat_mlxcpld_lc_act,
-	},
-};
-
 static struct mlxreg_core_data mlxplat_mlxcpld_modular_asic_items_data[] = {
 	{
 		.label = "asic1",
 		.reg = MLXPLAT_CPLD_LPC_REG_ASIC_HEALTH_OFFSET,
 		.mask = MLXPLAT_CPLD_ASIC_MASK,
-#if 0
-		.hpdev.brdinfo = &mlxplat_mlxcpld_chip_i2c_dev[0],
-		.hpdev.nr = MLXPLAT_CPLD_NR_ASIC,
-#endif
 		.hpdev.nr = MLXPLAT_CPLD_NR_NONE,
 	},
 };
@@ -3622,13 +3611,13 @@ static struct mlxreg_core_data mlxplat_mlxcpld_modular_regs_io_data[] = {
 		.label = "safe_bios_dis",
 		.reg = MLXPLAT_CPLD_LPC_SAFE_BIOS_OFFSET,
 		.mask = GENMASK(7, 0) & ~BIT(5),
-		.mode = 0444,
+		.mode = 0644,
 	},
 	{
 		.label = "safe_bios_dis_wp",
 		.reg = MLXPLAT_CPLD_LPC_SAFE_BIOS_WP_OFFSET,
 		.mask = GENMASK(7, 0) & ~BIT(5),
-		.mode = 0444,
+		.mode = 0644,
 	},
 	{
 		.label = "asic_health",
