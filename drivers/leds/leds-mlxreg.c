@@ -85,9 +85,7 @@ mlxreg_led_store_hw(struct mlxreg_led_data *led_data, u8 vset)
 	nib = (ror32(data->mask, data->bit) == 0xf0) ? rol32(vset, data->bit) :
 	      rol32(vset, data->bit + 4);
 	regval = (regval & data->mask) | nib;
-
 	ret = regmap_write(led_pdata->regmap, data->reg, regval);
-
 access_error:
 	mutex_unlock(&priv->access_lock);
 
@@ -254,9 +252,6 @@ static int mlxreg_led_config(struct mlxreg_led_priv_data *priv)
 		if (err)
 			return err;
 
-		if (led_cdev->brightness)
-			mlxreg_led_brightness_set(led_cdev,
-						  led_cdev->brightness);
 		dev_info(led_cdev->dev, "label: %s, mask: 0x%02x, offset:0x%02x\n",
 			 data->label, data->mask, data->reg);
 	}
